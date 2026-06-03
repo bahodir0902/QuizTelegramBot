@@ -44,9 +44,11 @@ jobs:
           port: ${{ secrets.VPS_SSH_PORT }}
           script: |
             set -e
-            cd /opt/quiz-bot || mkdir -p /opt/quiz-bot && cd /opt/quiz-bot
+            cd quiz-bot || mkdir -p quiz-bot && cd ./quiz-bot
+            
             # pull latest code
             if [ -d .git ]; then git fetch --all && git reset --hard origin/main; else git clone https://github.com/${{ github.repository }} .; fi
+            
             # build and restart with docker-compose while keeping volumes
             docker compose down || true
             docker compose pull || true
