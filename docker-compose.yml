@@ -1,0 +1,20 @@
+services:
+  quiz-bot:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TG_BOT_TOKEN: ${TG_BOT_TOKEN}
+      INITIAL_ADMIN_IDS: ${INITIAL_ADMIN_IDS}
+      QUIZ_BOT_DATA_DIR: /data
+    volumes:
+      - quiz-bot-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sqlite3; sqlite3.connect('/data/quiz_bot.db').close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  quiz-bot-data:
