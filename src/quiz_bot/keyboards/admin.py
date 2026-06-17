@@ -8,8 +8,17 @@ from quiz_bot.config.constants import (
     CB_ADMIN_ADD,
     CB_ADMIN_BACK,
     CB_ADMIN_EXPORT,
+    CB_ADMIN_QUESTIONS,
     CB_ADMIN_SETTINGS,
     CB_ADMIN_STATS,
+    CB_QUESTION_DELETE_CONFIRM_PREFIX,
+    CB_QUESTION_DELETE_OPTION_PREFIX,
+    CB_QUESTION_DELETE_PREFIX,
+    CB_QUESTION_EDIT_CORRECT_PREFIX,
+    CB_QUESTION_EDIT_OPTIONS_PREFIX,
+    CB_QUESTION_EDIT_TEXT_PREFIX,
+    CB_QUESTION_OPTIONS_PREFIX,
+    CB_QUESTION_VIEW_PREFIX,
     CB_SET_LIMIT,
     CB_SET_TIMER,
     CB_TOGGLE_OPT_SHUFFLE,
@@ -26,6 +35,12 @@ def admin_dashboard_keyboard(language_code: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     translate(language_code, "admin_add_question"),
                     callback_data=CB_ADMIN_ADD,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    translate(language_code, "admin_manage_questions"),
+                    callback_data=CB_ADMIN_QUESTIONS,
                 )
             ],
             [
@@ -48,6 +63,129 @@ def admin_dashboard_keyboard(language_code: str) -> InlineKeyboardMarkup:
             ],
         ]
     )
+
+
+def _shorten(text: str, limit: int = 40) -> str:
+    cleaned = " ".join(text.split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return f"{cleaned[: limit - 1]}..."
+
+
+def admin_questions_keyboard(rows, language_code: str) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = []
+    for row in rows:
+        question_id = int(row["id"])
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    f"#{question_id} {_shorten(str(row['question_text']))}",
+                    callback_data=f"{CB_QUESTION_VIEW_PREFIX}{question_id}",
+                )
+            ]
+        )
+    buttons.append(
+        [
+            InlineKeyboardButton(
+                translate(language_code, "admin_back"),
+                callback_data=CB_ADMIN_BACK,
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(buttons)
+
+
+def admin_question_detail_keyboard(question_id: int, language_code: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    translate(language_code, "admin_edit_question_text"),
+                    callback_data=f"{CB_QUESTION_EDIT_TEXT_PREFIX}{question_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    translate(language_code, "admin_edit_options"),
+                    callback_data=f"{CB_QUESTION_EDIT_OPTIONS_PREFIX}{question_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    translate(language_code, "admin_set_correct_option"),
+                    callback_data=f"{CB_QUESTION_EDIT_CORRECT_PREFIX}{question_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    translate(language_code, "admin_manage_options"),
+                    callback_data=f"{CB_QUESTION_OPTIONS_PREFIX}{question_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    translate(language_code, "admin_delete_question"),
+                    callback_data=f"{CB_QUESTION_DELETE_CONFIRM_PREFIX}{question_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    translate(language_code, "admin_back"),
+                    callback_data=CB_ADMIN_QUESTIONS,
+                )
+            ],
+        ]
+    )
+
+
+def admin_question_delete_keyboard(question_id: int, language_code: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    translate(language_code, "admin_confirm_delete"),
+                    callback_data=f"{CB_QUESTION_DELETE_PREFIX}{question_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    translate(language_code, "admin_cancel_delete"),
+                    callback_data=f"{CB_QUESTION_VIEW_PREFIX}{question_id}",
+                )
+            ],
+        ]
+    )
+
+
+def admin_question_options_keyboard(
+    question_id: int,
+    options: list[str],
+    language_code: str,
+) -> InlineKeyboardMarkup:
+    buttons: list[list[InlineKeyboardButton]] = []
+    for index, option in enumerate(options):
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    translate(
+                        language_code,
+                        "admin_delete_option_button",
+                        index=index,
+                        option=_shorten(option, 28),
+                    ),
+                    callback_data=f"{CB_QUESTION_DELETE_OPTION_PREFIX}{question_id}:{index}",
+                )
+            ]
+        )
+    buttons.append(
+        [
+            InlineKeyboardButton(
+                translate(language_code, "admin_back"),
+                callback_data=f"{CB_QUESTION_VIEW_PREFIX}{question_id}",
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(buttons)
 
 
 def admin_settings_keyboard(config: BotConfig, language_code: str) -> InlineKeyboardMarkup:

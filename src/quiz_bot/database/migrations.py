@@ -45,6 +45,8 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
             score INTEGER NOT NULL DEFAULT 0,
             current_poll_id TEXT,
             current_correct_index INTEGER,
+            current_question_id INTEGER,
+            current_option_order_json TEXT,
             session_status TEXT NOT NULL DEFAULT 'idle',
             start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             finished_time TIMESTAMP,
@@ -53,6 +55,18 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
 
         CREATE TABLE IF NOT EXISTS admins (
             user_id INTEGER PRIMARY KEY
+        );
+
+        CREATE TABLE IF NOT EXISTS question_answers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            question_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            poll_id TEXT NOT NULL UNIQUE,
+            selected_option_index INTEGER,
+            was_correct INTEGER NOT NULL DEFAULT 0,
+            timed_out INTEGER NOT NULL DEFAULT 0,
+            answered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(question_id) REFERENCES questions(id) ON DELETE CASCADE
         );
         """
     )
@@ -81,6 +95,10 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE user_progress ADD COLUMN session_status TEXT NOT NULL DEFAULT 'idle'"
         )
+    if "current_question_id" not in columns:
+        conn.execute("ALTER TABLE user_progress ADD COLUMN current_question_id INTEGER")
+    if "current_option_order_json" not in columns:
+        conn.execute("ALTER TABLE user_progress ADD COLUMN current_option_order_json TEXT")
     if "finished_time" not in columns:
         conn.execute("ALTER TABLE user_progress ADD COLUMN finished_time TIMESTAMP")
     if "last_duration_seconds" not in columns:

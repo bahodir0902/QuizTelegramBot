@@ -95,8 +95,9 @@ async def serve_question(
     config = await adb_run(read_config)
     poll_options = options
     mapped_correct = correct_index
+    option_order = list(range(len(options)))
     if config.shuffle_options:
-        poll_options, mapped_correct = shuffle_options_for_poll(options, correct_index)
+        poll_options, mapped_correct, option_order = shuffle_options_for_poll(options, correct_index)
 
     open_period = config.question_timeout if config.question_timeout > 0 else None
 
@@ -142,7 +143,14 @@ async def serve_question(
         return
 
     await adb_run(
-        lambda conn: update_poll_state_db(conn, user_id, str(poll.id), mapped_correct),
+        lambda conn: update_poll_state_db(
+            conn,
+            user_id,
+            str(poll.id),
+            mapped_correct,
+            int(row["id"]),
+            option_order,
+        ),
         commit=True,
     )
 

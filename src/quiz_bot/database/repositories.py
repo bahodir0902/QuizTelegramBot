@@ -9,6 +9,20 @@ from datetime import UTC, datetime
 from quiz_bot.domain import BotConfig
 
 
+def _load_options(options_json: str) -> list[str]:
+    data = json.loads(options_json)
+    if not isinstance(data, list):
+        raise ValueError("options_json must be a list")
+    return [str(item) for item in data]
+
+
+def _validate_options(options: list[str], correct_option_index: int) -> None:
+    if len(options) < 2:
+        raise ValueError("A question needs at least two options")
+    if correct_option_index < 0 or correct_option_index >= len(options):
+        raise ValueError("Correct option index is out of range")
+
+
 def row_to_config(row: sqlite3.Row) -> BotConfig:
     return BotConfig(
         num_questions=int(row["num_questions"]),
@@ -168,6 +182,7 @@ def insert_question_db(
     options: list[str],
     correct_option_index: int,
 ) -> None:
+    _validate_options(options, correct_option_index)
     conn.execute(
         """
         INSERT INTO questions (question_text, options_json, correct_option_index)
@@ -179,6 +194,144 @@ def insert_question_db(
             correct_option_index,
         ),
     )
+
+
+def list_questions_db(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            """
+            SELECT id, question_text, correct_option_index
+            FROM questions
+            ORDER BY id ASC
+            """
+        ).fetchall()
+    )
+
+
+def update_question_text_db(
+    conn: sqlite3.Connection,
+    question_id: int,
+    question_text: str,
+) -> bool:
+    cursor = conn.execute(
+        "UPDATE questions SET question_text = ? WHERE id = ?",
+        (question_text, question_id),
+    )
+    return cursor.rowcount == 1
+
+
+def replace_question_options_db(
+    conn: sqlite3.Connection,
+    question_id: int,
+    options: list[str],
+    correct_option_index: int,
+) -> bool:
+    _validate_options(options, correct_option_index)
+    cursor = conn.execute(
+        """
+        UPDATE questions
+        SET options_json = ?, correct_option_index = ?
+        WHERE id = ?
+        """,
+        (
+            json.dumps(options, ensure_ascii=False),
+            correct_option_index,
+            question_id,
+        ),
+    )
+    return cursor.rowcount == 1
+
+
+def update_question_correct_index_db(
+    conn: sqlite3.Connection,
+    question_id: int,
+    correct_option_index: int,
+) -> bool:
+    row = fetch_question_db(conn, question_id)
+    if row is None:
+        return False
+    options = _load_options(str(row["options_json"]))
+    _validate_options(options, correct_option_index)
+    cursor = conn.execute(
+        "UPDATE questions SET correct_option_index = ? WHERE id = ?",
+        (correct_option_index, question_id),
+    )
+    return cursor.rowcount == 1
+
+
+def delete_question_db(conn: sqlite3.Connection, question_id: int) -> bool:
+    cursor = conn.execute(
+        "DELETE FROM questions WHERE id = ?",
+        (question_id,),
+    )
+    return cursor.rowcount == 1
+
+
+def delete_question_option_db(
+    conn: sqlite3.Connection,
+    question_id: int,
+    option_index: int,
+) -> tuple[bool, str]:
+    row = fetch_question_db(conn, question_id)
+    if row is None:
+        return False, "missing_question"
+    options = _load_options(str(row["options_json"]))
+    if option_index < 0 or option_index >= len(options):
+        return False, "invalid_option"
+    if len(options) <= 2:
+        return False, "minimum_options"
+
+    correct_index = int(row["correct_option_index"])
+    options.pop(option_index)
+    if option_index == correct_index:
+        correct_index = 0
+    elif option_index < correct_index:
+        correct_index -= 1
+
+    replace_question_options_db(conn, question_id, options, correct_index)
+    return True, "ok"
+
+
+def fetch_question_stats_db(conn: sqlite3.Connection, question_id: int) -> dict[str, object] | None:
+    row = fetch_question_db(conn, question_id)
+    if row is None:
+        return None
+
+    summary = conn.execute(
+        """
+        SELECT
+            COUNT(id) AS attempts,
+            COALESCE(SUM(CASE WHEN timed_out = 0 THEN 1 ELSE 0 END), 0) AS answered,
+            COALESCE(SUM(CASE WHEN was_correct = 1 THEN 1 ELSE 0 END), 0) AS correct,
+            COALESCE(SUM(CASE WHEN timed_out = 1 THEN 1 ELSE 0 END), 0) AS timed_out
+        FROM question_answers
+        WHERE question_id = ?
+        """,
+        (question_id,),
+    ).fetchone()
+    option_rows = conn.execute(
+        """
+        SELECT selected_option_index, COUNT(*) AS selected_count
+        FROM question_answers
+        WHERE question_id = ?
+            AND timed_out = 0
+            AND selected_option_index IS NOT NULL
+        GROUP BY selected_option_index
+        """,
+        (question_id,),
+    ).fetchall()
+    option_counts = {
+        int(option_row["selected_option_index"]): int(option_row["selected_count"])
+        for option_row in option_rows
+    }
+    return {
+        "question": row,
+        "attempts": int(summary["attempts"]),
+        "answered": int(summary["answered"]),
+        "correct": int(summary["correct"]),
+        "timed_out": int(summary["timed_out"]),
+        "option_counts": option_counts,
+    }
 
 
 def update_config_field_db(conn: sqlite3.Connection, column: str, value: int) -> None:
@@ -234,6 +387,8 @@ def save_quiz_pool_db(conn: sqlite3.Connection, user_id: int, question_ids: list
             score = 0,
             current_poll_id = NULL,
             current_correct_index = NULL,
+            current_question_id = NULL,
+            current_option_order_json = NULL,
             session_status = 'active',
             start_time = ?,
             finished_time = NULL,
@@ -253,16 +408,26 @@ def update_poll_state_db(
     user_id: int,
     poll_id: str,
     correct_index: int,
+    question_id: int,
+    option_order: list[int],
 ) -> None:
     conn.execute(
         """
         UPDATE user_progress SET
             current_poll_id = ?,
             current_correct_index = ?,
+            current_question_id = ?,
+            current_option_order_json = ?,
             session_status = 'active'
         WHERE user_id = ?
         """,
-        (poll_id, correct_index, user_id),
+        (
+            poll_id,
+            correct_index,
+            question_id,
+            json.dumps(option_order),
+            user_id,
+        ),
     )
 
 
@@ -290,6 +455,8 @@ def increment_score_and_advance_db(
             current_pool_index = ?,
             current_poll_id = NULL,
             current_correct_index = NULL,
+            current_question_id = NULL,
+            current_option_order_json = NULL,
             session_status = CASE
                 WHEN question_ids_json IS NULL THEN 'idle'
                 ELSE session_status
@@ -323,12 +490,27 @@ def advance_timeout_poll_db(
         return None, "stale_poll"
 
     new_index = int(row["current_pool_index"]) + 1
+    question_id = row["current_question_id"]
+    if question_id is not None:
+        conn.execute(
+            """
+            INSERT INTO question_answers (
+                question_id, user_id, poll_id, selected_option_index, was_correct, timed_out
+            )
+            SELECT ?, ?, ?, NULL, 0, 1
+            WHERE EXISTS (SELECT 1 FROM questions WHERE id = ?)
+            ON CONFLICT(poll_id) DO NOTHING
+            """,
+            (int(question_id), user_id, poll_id, int(question_id)),
+        )
     cursor = conn.execute(
         """
         UPDATE user_progress SET
             current_pool_index = ?,
             current_poll_id = NULL,
-            current_correct_index = NULL
+            current_correct_index = NULL,
+            current_question_id = NULL,
+            current_option_order_json = NULL
         WHERE user_id = ? AND current_poll_id = ?
         """,
         (new_index, user_id, poll_id),
@@ -367,6 +549,37 @@ def score_poll_answer_db(
         return None, "missing_correct_index"
 
     was_correct = selected_option_id == int(correct_index)
+    question_id = row["current_question_id"]
+    option_order_json = row["current_option_order_json"]
+    selected_original_index = selected_option_id
+    if option_order_json is not None:
+        try:
+            option_order = json.loads(str(option_order_json))
+            if isinstance(option_order, list):
+                selected_original_index = int(option_order[selected_option_id])
+        except (IndexError, TypeError, ValueError, json.JSONDecodeError):
+            selected_original_index = selected_option_id
+
+    if question_id is not None:
+        conn.execute(
+            """
+            INSERT INTO question_answers (
+                question_id, user_id, poll_id, selected_option_index, was_correct, timed_out
+            )
+            SELECT ?, ?, ?, ?, ?, 0
+            WHERE EXISTS (SELECT 1 FROM questions WHERE id = ?)
+            ON CONFLICT(poll_id) DO NOTHING
+            """,
+            (
+                int(question_id),
+                bound_user_id,
+                poll_id,
+                selected_original_index,
+                1 if was_correct else 0,
+                int(question_id),
+            ),
+        )
+
     new_score = int(row["score"]) + (1 if was_correct else 0)
     new_index = int(row["current_pool_index"]) + 1
     cursor = conn.execute(
@@ -375,7 +588,9 @@ def score_poll_answer_db(
             score = ?,
             current_pool_index = ?,
             current_poll_id = NULL,
-            current_correct_index = NULL
+            current_correct_index = NULL,
+            current_question_id = NULL,
+            current_option_order_json = NULL
         WHERE user_id = ? AND current_poll_id = ?
         """,
         (new_score, new_index, bound_user_id, poll_id),
@@ -402,6 +617,8 @@ def clear_active_poll_db(
         UPDATE user_progress SET
             current_poll_id = NULL,
             current_correct_index = NULL,
+            current_question_id = NULL,
+            current_option_order_json = NULL,
             session_status = ?
         WHERE user_id = ?
         """,
