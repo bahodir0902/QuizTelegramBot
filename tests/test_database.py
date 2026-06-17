@@ -6,25 +6,32 @@ import asyncio
 import sqlite3
 import tempfile
 import unittest
+from datetime import UTC, datetime
 from pathlib import Path
 
 from quiz_bot.config import AppSettings
+from quiz_bot.config.settings import DEFAULT_ABOUT_US_TEXT
 from quiz_bot.database import (
     BotConfig,
     adb_run,
     advance_timeout_poll_db,
+    complete_onboarding_db,
+    complete_quiz_session_db,
     configure_database_settings,
     get_user_progress_db,
     increment_score_and_advance_db,
     init_database,
     insert_question_db,
     read_config,
+    save_onboarding_age_db,
+    save_onboarding_name_db,
     save_quiz_pool_db,
     start_quiz_session_db,
     toggle_config_field_db,
     upsert_user_db,
 )
 from quiz_bot.database.connection import connect
+from quiz_bot.database.migrations import apply_migrations
 
 
 class DatabaseLayerTests(unittest.TestCase):
@@ -43,6 +50,7 @@ class DatabaseLayerTests(unittest.TestCase):
             read_timeout=30.0,
             write_timeout=30.0,
             pool_timeout=10.0,
+            about_us_text=DEFAULT_ABOUT_US_TEXT,
         )
         configure_database_settings(self._settings)
         init_database(self._settings)
@@ -90,6 +98,111 @@ class DatabaseLayerTests(unittest.TestCase):
         assert row is not None
         self.assertEqual(int(row["score"]), 0)
         self.assertEqual(int(row["current_pool_index"]), 0)
+        self.assertIsNotNone(row["start_time"])
+        self.assertIsNone(row["finished_time"])
+        self.assertIsNone(row["last_duration_seconds"])
+
+    def test_new_user_requires_onboarding_by_default(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 43, "newbie", "New User")
+        conn.commit()
+
+        row = get_user_progress_db(conn, 43)
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(int(row["onboarding_completed"]), 0)
+        self.assertIsNone(row["first_name"])
+        self.assertIsNone(row["age"])
+        self.assertIsNone(row["region"])
+
+    def test_onboarding_profile_fields_are_saved(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 44, "student", "Telegram Name")
+        save_onboarding_name_db(conn, 44, "Alice", "Smith")
+        save_onboarding_age_db(conn, 44, 19)
+        completed = complete_onboarding_db(conn, 44, "Samarkand")
+        conn.commit()
+
+        self.assertEqual(completed["first_name"], "Alice")
+        self.assertEqual(completed["last_name"], "Smith")
+        self.assertEqual(completed["full_name"], "Alice Smith")
+        self.assertEqual(int(completed["age"]), 19)
+        self.assertEqual(completed["region"], "Samarkand")
+        self.assertEqual(int(completed["onboarding_completed"]), 1)
+        self.assertIsNone(completed["onboarding_step"])
+        self.assertIsNotNone(completed["onboarded_at"])
+
+    def test_existing_users_are_marked_onboarded_during_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "old.db"
+            conn = sqlite3.connect(path)
+            conn.row_factory = sqlite3.Row
+            conn.executescript(
+                """
+                CREATE TABLE user_progress (
+                    user_id INTEGER PRIMARY KEY,
+                    username TEXT,
+                    full_name TEXT,
+                    language_code TEXT,
+                    question_ids_json TEXT,
+                    current_pool_index INTEGER NOT NULL DEFAULT 0,
+                    score INTEGER NOT NULL DEFAULT 0,
+                    current_poll_id TEXT,
+                    current_correct_index INTEGER,
+                    session_status TEXT NOT NULL DEFAULT 'idle',
+                    start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT INTO user_progress (user_id, username, full_name, language_code)
+                VALUES (77, 'legacy', 'Legacy User', 'en');
+                """
+            )
+
+            apply_migrations(conn)
+            row = conn.execute(
+                "SELECT onboarding_completed, onboarding_step FROM user_progress WHERE user_id = 77"
+            ).fetchone()
+            conn.close()
+
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(int(row["onboarding_completed"]), 1)
+        self.assertIsNone(row["onboarding_step"])
+
+    def test_complete_quiz_session_stores_duration(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 45, None, "Timer User")
+        save_quiz_pool_db(conn, 45, [1, 2])
+        conn.execute(
+            """
+            UPDATE user_progress
+            SET start_time = ?,
+                current_pool_index = 2,
+                score = 2,
+                current_poll_id = 'poll-1',
+                current_correct_index = 0
+            WHERE user_id = ?
+            """,
+            ("2026-01-01T00:00:00+00:00", 45),
+        )
+        completed = complete_quiz_session_db(
+            conn,
+            45,
+            finished_at=datetime(2026, 1, 1, 0, 2, 5, tzinfo=UTC),
+        )
+        conn.commit()
+
+        self.assertEqual(int(completed["last_duration_seconds"]), 125)
+        self.assertEqual(completed["session_status"], "completed")
+        self.assertIsNone(completed["current_poll_id"])
+        self.assertIsNone(completed["current_correct_index"])
+
+        repeated = complete_quiz_session_db(
+            conn,
+            45,
+            finished_at=datetime(2026, 1, 1, 0, 10, 0, tzinfo=UTC),
+        )
+        self.assertEqual(int(repeated["last_duration_seconds"]), 125)
+        self.assertEqual(repeated["finished_time"], completed["finished_time"])
 
     def test_toggle_shuffle_questions(self) -> None:
         conn = self.open_conn()
@@ -111,7 +224,12 @@ class DatabaseLayerTests(unittest.TestCase):
         upsert_user_db(conn, 9, None, "Eve")
         save_quiz_pool_db(conn, 9, [1])
         conn.execute(
-            "UPDATE user_progress SET current_poll_id = ?, current_correct_index = ? WHERE user_id = ?",
+            """
+            UPDATE user_progress
+            SET current_poll_id = ?,
+                current_correct_index = ?
+            WHERE user_id = ?
+            """,
             ("poll-1", 0, 9),
         )
         conn.commit()

@@ -12,13 +12,19 @@ from telegram.ext import ContextTypes
 from quiz_bot.database import (
     adb_run,
     clear_active_poll_db,
+    complete_quiz_session_db,
     fetch_question_db,
     get_user_progress_db,
     read_config,
     update_poll_state_db,
 )
+from quiz_bot.keyboards import main_reply_keyboard
 from quiz_bot.services.localization_service import resolve_language, translate
-from quiz_bot.services.question_service import shuffle_options_for_poll
+from quiz_bot.services.onboarding_service import format_duration
+from quiz_bot.services.question_service import (
+    format_numbered_question,
+    shuffle_options_for_poll,
+)
 from quiz_bot.utils.json import parse_json_int_list, parse_options_json
 
 logger = logging.getLogger(__name__)
@@ -41,17 +47,22 @@ async def serve_question(
     pool = parse_json_int_list(progress["question_ids_json"])
     index = int(progress["current_pool_index"])
     if index >= len(pool):
+        completed = await adb_run(
+            lambda conn: complete_quiz_session_db(conn, user_id),
+            commit=True,
+        )
         await context.bot.send_message(
             chat_id=chat_id,
             text=translate(
                 language_code,
-                "quiz_complete",
-                score=int(progress["score"]),
+                "quiz_complete_timed",
+                score=int(completed["score"]),
                 total=len(pool),
+                duration=format_duration(completed["last_duration_seconds"]),
             ),
             parse_mode=ParseMode.MARKDOWN,
+            reply_markup=main_reply_keyboard(language_code),
         )
-        await adb_run(lambda conn: clear_active_poll_db(conn, user_id), commit=True)
         return
 
     row = await adb_run(lambda conn: fetch_question_db(conn, pool[index]))
@@ -92,12 +103,17 @@ async def serve_question(
     try:
         poll_message = await context.bot.send_poll(
             chat_id=chat_id,
-            question=str(row["question_text"]),
+            question=format_numbered_question(
+                str(row["question_text"]),
+                index,
+                len(pool),
+            ),
             options=poll_options,
             type="quiz",
             correct_option_id=mapped_correct,
             is_anonymous=False,
             open_period=open_period,
+            protect_content=True,
         )
     except Forbidden:
         logger.warning("User blocked bot during active quiz user_id=%s", user_id)

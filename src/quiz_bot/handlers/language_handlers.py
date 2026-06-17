@@ -9,11 +9,21 @@ from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
-from quiz_bot.database import adb_run, get_user_progress_db, set_user_language_db, upsert_user_db
+from quiz_bot.database import (
+    adb_run,
+    get_user_progress_db,
+    set_user_language_db,
+    upsert_user_db,
+)
 from quiz_bot.keyboards import language_keyboard, main_reply_keyboard
 from quiz_bot.services.localization_service import resolve_language, translate
+from quiz_bot.services.onboarding_service import is_onboarding_complete
 
 logger = logging.getLogger(__name__)
+
+
+def _telegram_full_name(user) -> str:
+    return user.full_name or user.first_name or "User"
 
 
 async def cmd_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -23,11 +33,19 @@ async def cmd_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user = update.effective_user
     try:
         await adb_run(
-            lambda conn: upsert_user_db(conn, user.id, user.username, user.full_name or user.first_name or "User"),
+            lambda conn: upsert_user_db(
+                conn,
+                user.id,
+                user.username,
+                _telegram_full_name(user),
+            ),
             commit=True,
         )
     except sqlite3.Error:
-        logger.exception("SQLite error while ensuring language chooser user row user_id=%s", user.id)
+        logger.exception(
+            "SQLite error while ensuring language chooser user row user_id=%s",
+            user.id,
+        )
     if update.message is not None:
         await update.message.reply_text(
             "Choose your language.\nВыберите язык.\nTilni tanlang.",
@@ -54,7 +72,12 @@ async def handle_language_callback(update: Update, context: ContextTypes.DEFAULT
     language_code = query.data.split(":", 1)[1]
     try:
         await adb_run(
-            lambda conn: upsert_user_db(conn, user.id, user.username, user.full_name or user.first_name or "User"),
+            lambda conn: upsert_user_db(
+                conn,
+                user.id,
+                user.username,
+                _telegram_full_name(user),
+            ),
             commit=True,
         )
         await adb_run(
@@ -71,6 +94,13 @@ async def handle_language_callback(update: Update, context: ContextTypes.DEFAULT
     await query.edit_message_text(translate(active_language, "language_updated"))
 
     if row is None:
+        return
+
+    if not is_onboarding_complete(row):
+        await context.bot.send_message(
+            chat_id=user.id,
+            text=translate(active_language, "complete_registration_first"),
+        )
         return
 
     await context.bot.send_message(

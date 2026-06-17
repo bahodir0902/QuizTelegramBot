@@ -18,6 +18,9 @@ from telegram.request import HTTPXRequest
 from quiz_bot.config import (
     ASK_CORRECT_INDEX,
     ASK_NUM_QUESTIONS,
+    ASK_ONBOARD_AGE,
+    ASK_ONBOARD_FULL_NAME,
+    ASK_ONBOARD_REGION,
     ASK_OPTIONS,
     ASK_QUESTION_TEXT,
     ASK_TIMER_SECONDS,
@@ -39,26 +42,22 @@ from quiz_bot.handlers.language_handlers import (
     handle_language_callback,
 )
 from quiz_bot.handlers.poll_handlers import handle_poll_answer
-from quiz_bot.handlers.user_handlers import cmd_start, handle_start_quiz
-from quiz_bot.locales.messages import CHANGE_LANGUAGE_LABELS, START_QUIZ_LABELS
+from quiz_bot.handlers.user_handlers import (
+    cmd_start,
+    handle_about_us,
+    handle_onboarding_age,
+    handle_onboarding_name,
+    handle_onboarding_region,
+    handle_start_quiz,
+)
+from quiz_bot.locales.messages import ABOUT_US_LABELS, CHANGE_LANGUAGE_LABELS, START_QUIZ_LABELS
 
-
-from telegram.request import HTTPXRequest
 
 def _build_request(settings: AppSettings) -> HTTPXRequest:
-    # Pass your read_timeout (plus padding if you want) directly into the request client
     return HTTPXRequest(
         read_timeout=settings.read_timeout + 5,
-        connect_timeout=settings.connect_timeout, # or a fixed default like 5.0
+        connect_timeout=settings.connect_timeout,
     )
-    
-# def _build_request(settings: AppSettings) -> HTTPXRequest:
-#     return HTTPXRequest(
-#         connect_timeout=settings.connect_timeout,
-#         read_timeout=settings.read_timeout,
-#         write_timeout=settings.write_timeout,
-#         pool_timeout=settings.pool_timeout,
-#     )
 
 
 def _start_quiz_regex() -> str:
@@ -68,6 +67,11 @@ def _start_quiz_regex() -> str:
 
 def _change_language_regex() -> str:
     escaped = [re.escape(label) for label in CHANGE_LANGUAGE_LABELS]
+    return "^(" + "|".join(escaped) + ")$"
+
+
+def _about_us_regex() -> str:
+    escaped = [re.escape(label) for label in ABOUT_US_LABELS]
     return "^(" + "|".join(escaped) + ")$"
 
 
@@ -129,17 +133,44 @@ def build_application(settings: AppSettings) -> Application:
         per_message=False,
     )
 
-    app.add_handler(CommandHandler("start", cmd_start))
+    user_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("start", cmd_start),
+            MessageHandler(filters.Regex(_start_quiz_regex()), handle_start_quiz),
+            MessageHandler(filters.Regex(_about_us_regex()), handle_about_us),
+        ],
+        states={
+            ASK_ONBOARD_FULL_NAME: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    handle_onboarding_name,
+                )
+            ],
+            ASK_ONBOARD_AGE: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    handle_onboarding_age,
+                )
+            ],
+            ASK_ONBOARD_REGION: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    handle_onboarding_region,
+                )
+            ],
+        },
+        fallbacks=[CommandHandler("start", cmd_start)],
+        allow_reentry=True,
+        per_user=True,
+        per_chat=True,
+        per_message=False,
+    )
+
+    app.add_handler(user_conv)
     app.add_handler(CommandHandler("language", cmd_language))
     app.add_handler(CommandHandler("admin", cmd_admin))
     app.add_handler(CallbackQueryHandler(handle_language_callback, pattern="^lang:"))
     app.add_handler(admin_conv)
-    app.add_handler(
-        MessageHandler(
-            filters.Regex(_start_quiz_regex()),
-            handle_start_quiz,
-        )
-    )
     app.add_handler(
         MessageHandler(
             filters.Regex(_change_language_regex()),

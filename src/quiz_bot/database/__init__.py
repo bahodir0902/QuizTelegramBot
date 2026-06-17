@@ -7,12 +7,15 @@ import sqlite3
 from pathlib import Path
 
 from quiz_bot.config import AppSettings, load_settings
+from quiz_bot.config.settings import DEFAULT_ABOUT_US_TEXT
 from quiz_bot.database.connection import connect
 from quiz_bot.database.migrations import apply_migrations
 from quiz_bot.database.repositories import (
     advance_timeout_poll_db,
     build_question_pool_db,
     clear_active_poll_db,
+    complete_onboarding_db,
+    complete_quiz_session_db,
     count_questions_db,
     fetch_export_rows_db,
     fetch_leaderboard_db,
@@ -25,9 +28,12 @@ from quiz_bot.database.repositories import (
     mark_session_status_db,
     read_config,
     save_quiz_pool_db,
+    save_onboarding_age_db,
+    save_onboarding_name_db,
     score_poll_answer_db,
     seed_admin_db,
     set_user_language_db,
+    set_onboarding_step_db,
     toggle_config_field_db,
     update_config_field_db,
     update_poll_state_db,
@@ -63,6 +69,7 @@ def _compat_settings() -> AppSettings:
                     read_timeout=30.0,
                     write_timeout=30.0,
                     pool_timeout=10.0,
+                    about_us_text=DEFAULT_ABOUT_US_TEXT,
                 )
         return AppSettings(
             bot_token=base.bot_token,
@@ -76,6 +83,7 @@ def _compat_settings() -> AppSettings:
             read_timeout=base.read_timeout,
             write_timeout=base.write_timeout,
             pool_timeout=base.pool_timeout,
+            about_us_text=base.about_us_text,
         )
 
     if _settings_override is not None:
@@ -97,6 +105,7 @@ def _compat_settings() -> AppSettings:
             read_timeout=30.0,
             write_timeout=30.0,
             pool_timeout=10.0,
+            about_us_text=DEFAULT_ABOUT_US_TEXT,
         )
 
 
@@ -175,6 +184,8 @@ __all__ = [
     "advance_timeout_poll_db",
     "build_question_pool_db",
     "clear_active_poll_db",
+    "complete_onboarding_db",
+    "complete_quiz_session_db",
     "configure_database_settings",
     "count_questions_db",
     "db_run",
@@ -190,9 +201,12 @@ __all__ = [
     "mark_session_status_db",
     "read_config",
     "save_quiz_pool_db",
+    "save_onboarding_age_db",
+    "save_onboarding_name_db",
     "score_poll_answer_db",
     "seed_initial_admins",
     "set_user_language_db",
+    "set_onboarding_step_db",
     "start_quiz_session_db",
     "toggle_config_field_db",
     "update_config_field_db",

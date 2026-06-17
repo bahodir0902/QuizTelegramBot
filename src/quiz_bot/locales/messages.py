@@ -200,5 +200,24 @@ MESSAGES: dict[str, dict[str, str]] = {
     },
 }
 
+COMMON_MESSAGES = {
+    "about_us_label": "About Us",
+    "onboarding_name_prompt": "Let's create your profile. Send your first and last name.",
+    "onboarding_name_invalid": "Please send both first and last name as text.",
+    "onboarding_age_prompt": "Great. Now send your age as a number.",
+    "onboarding_age_invalid": "Please send a valid age as a number between 1 and 120.",
+    "onboarding_region_prompt": "Choose your region or type your location.",
+    "onboarding_region_invalid": "Please send a region or location.",
+    "onboarding_complete": "Registration complete.",
+    "complete_registration_first": "Please complete registration before using this option.",
+    "quiz_complete_timed": (
+        "Quiz complete!\n\nYour score: *{score}* / {total}\nTime taken: {duration}"
+    ),
+}
+
+for values in MESSAGES.values():
+    values.update(COMMON_MESSAGES)
+
 START_QUIZ_LABELS = tuple(values["start_quiz_label"] for values in MESSAGES.values())
 CHANGE_LANGUAGE_LABELS = tuple(values["change_language_label"] for values in MESSAGES.values())
+ABOUT_US_LABELS = tuple(values["about_us_label"] for values in MESSAGES.values())

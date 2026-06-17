@@ -8,6 +8,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+DEFAULT_ABOUT_US_TEXT = (
+    "About this bot:\n\n"
+    "This quiz bot was created to deliver engaging educational quizzes. "
+    "Edit ABOUT_US_TEXT in your environment to customize this section."
+)
+
 
 @dataclass(frozen=True)
 class AppSettings:
@@ -22,6 +28,7 @@ class AppSettings:
     read_timeout: float
     write_timeout: float
     pool_timeout: float
+    about_us_text: str
 
 
 def _load_dotenv() -> None:
@@ -50,7 +57,11 @@ def _parse_admin_ids(raw: str) -> tuple[int, ...]:
 def load_settings() -> AppSettings:
     """Load application settings from environment."""
     _load_dotenv()
-    token = os.getenv("TG_BOT_TOKEN", "").strip() or os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or os.getenv("BOT_TOKEN", "").strip()
+    token = (
+        os.getenv("TG_BOT_TOKEN", "").strip()
+        or os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        or os.getenv("BOT_TOKEN", "").strip()
+    )
     if not token:
         raise SystemExit("Set TG_BOT_TOKEN, TELEGRAM_BOT_TOKEN, or BOT_TOKEN.")
 
@@ -75,4 +86,6 @@ def load_settings() -> AppSettings:
         read_timeout=float(os.getenv("TG_READ_TIMEOUT", "35")),
         write_timeout=float(os.getenv("TG_WRITE_TIMEOUT", "30")),
         pool_timeout=float(os.getenv("TG_POOL_TIMEOUT", "10")),
+        about_us_text=os.getenv("ABOUT_US_TEXT", DEFAULT_ABOUT_US_TEXT).strip()
+        or DEFAULT_ABOUT_US_TEXT,
     )

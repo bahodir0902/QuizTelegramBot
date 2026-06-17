@@ -25,6 +25,26 @@ def read_config(conn: sqlite3.Connection) -> BotConfig:
     return row_to_config(row)
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _to_db_timestamp(value: datetime) -> str:
+    return value.astimezone(UTC).isoformat(timespec="microseconds")
+
+
+def _parse_db_timestamp(raw: object) -> datetime | None:
+    if raw in (None, ""):
+        return None
+    try:
+        value = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def is_admin_user(conn: sqlite3.Connection, user_id: int) -> bool:
     return (
         conn.execute(
@@ -48,7 +68,10 @@ def upsert_user_db(
         VALUES (?, ?, ?, ?)
         ON CONFLICT(user_id) DO UPDATE SET
             username = excluded.username,
-            full_name = excluded.full_name
+            full_name = CASE
+                WHEN user_progress.first_name IS NOT NULL THEN user_progress.full_name
+                ELSE excluded.full_name
+            END
         """,
         (user_id, username, full_name, language_code),
     )
@@ -66,6 +89,70 @@ def set_user_language_db(conn: sqlite3.Connection, user_id: int, language_code: 
         "UPDATE user_progress SET language_code = ? WHERE user_id = ?",
         (language_code, user_id),
     )
+
+
+def set_onboarding_step_db(conn: sqlite3.Connection, user_id: int, step: str) -> None:
+    conn.execute(
+        """
+        UPDATE user_progress
+        SET onboarding_step = ?,
+            onboarding_completed = 0
+        WHERE user_id = ?
+        """,
+        (step, user_id),
+    )
+
+
+def save_onboarding_name_db(
+    conn: sqlite3.Connection,
+    user_id: int,
+    first_name: str,
+    last_name: str,
+) -> None:
+    full_name = f"{first_name} {last_name}".strip()
+    conn.execute(
+        """
+        UPDATE user_progress
+        SET first_name = ?,
+            last_name = ?,
+            full_name = ?,
+            onboarding_step = 'age',
+            onboarding_completed = 0
+        WHERE user_id = ?
+        """,
+        (first_name, last_name, full_name, user_id),
+    )
+
+
+def save_onboarding_age_db(conn: sqlite3.Connection, user_id: int, age: int) -> None:
+    conn.execute(
+        """
+        UPDATE user_progress
+        SET age = ?,
+            onboarding_step = 'region',
+            onboarding_completed = 0
+        WHERE user_id = ?
+        """,
+        (age, user_id),
+    )
+
+
+def complete_onboarding_db(conn: sqlite3.Connection, user_id: int, region: str) -> sqlite3.Row:
+    conn.execute(
+        """
+        UPDATE user_progress
+        SET region = ?,
+            onboarding_completed = 1,
+            onboarding_step = NULL,
+            onboarded_at = ?
+        WHERE user_id = ?
+        """,
+        (region, _to_db_timestamp(_utc_now()), user_id),
+    )
+    row = get_user_progress_db(conn, user_id)
+    if row is None:
+        raise RuntimeError("user_progress row missing after onboarding completion")
+    return row
 
 
 def get_user_by_poll_id_db(conn: sqlite3.Connection, poll_id: str) -> sqlite3.Row | None:
@@ -122,7 +209,15 @@ def fetch_export_rows_db(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return list(
         conn.execute(
             """
-            SELECT username, full_name, score
+            SELECT
+                username,
+                full_name,
+                first_name,
+                last_name,
+                age,
+                region,
+                score,
+                last_duration_seconds
             FROM user_progress
             ORDER BY score DESC
             """
@@ -140,18 +235,25 @@ def save_quiz_pool_db(conn: sqlite3.Connection, user_id: int, question_ids: list
             current_poll_id = NULL,
             current_correct_index = NULL,
             session_status = 'active',
-            start_time = ?
+            start_time = ?,
+            finished_time = NULL,
+            last_duration_seconds = NULL
         WHERE user_id = ?
         """,
         (
             json.dumps(question_ids),
-            datetime.now(UTC).isoformat(timespec="seconds"),
+            _to_db_timestamp(_utc_now()),
             user_id,
         ),
     )
 
 
-def update_poll_state_db(conn: sqlite3.Connection, user_id: int, poll_id: str, correct_index: int) -> None:
+def update_poll_state_db(
+    conn: sqlite3.Connection,
+    user_id: int,
+    poll_id: str,
+    correct_index: int,
+) -> None:
     conn.execute(
         """
         UPDATE user_progress SET
@@ -290,7 +392,11 @@ def score_poll_answer_db(
     return updated, "ok"
 
 
-def clear_active_poll_db(conn: sqlite3.Connection, user_id: int, session_status: str = "idle") -> None:
+def clear_active_poll_db(
+    conn: sqlite3.Connection,
+    user_id: int,
+    session_status: str = "idle",
+) -> None:
     conn.execute(
         """
         UPDATE user_progress SET
@@ -301,6 +407,39 @@ def clear_active_poll_db(conn: sqlite3.Connection, user_id: int, session_status:
         """,
         (session_status, user_id),
     )
+
+
+def complete_quiz_session_db(
+    conn: sqlite3.Connection,
+    user_id: int,
+    finished_at: datetime | None = None,
+) -> sqlite3.Row:
+    row = get_user_progress_db(conn, user_id)
+    if row is None:
+        raise RuntimeError("user_progress row missing")
+    if row["session_status"] == "completed" and row["last_duration_seconds"] is not None:
+        return row
+
+    finished = (finished_at or _utc_now()).astimezone(UTC)
+    started = _parse_db_timestamp(row["start_time"]) or finished
+    duration_seconds = max(0, int((finished - started).total_seconds()))
+
+    conn.execute(
+        """
+        UPDATE user_progress SET
+            current_poll_id = NULL,
+            current_correct_index = NULL,
+            session_status = 'completed',
+            finished_time = ?,
+            last_duration_seconds = ?
+        WHERE user_id = ?
+        """,
+        (_to_db_timestamp(finished), duration_seconds, user_id),
+    )
+    updated = get_user_progress_db(conn, user_id)
+    if updated is None:
+        raise RuntimeError("user_progress row missing after quiz completion")
+    return updated
 
 
 def build_question_pool_db(conn: sqlite3.Connection, config: BotConfig) -> list[int]:

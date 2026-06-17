@@ -3,6 +3,9 @@
 from .constants import (
     ASK_CORRECT_INDEX,
     ASK_NUM_QUESTIONS,
+    ASK_ONBOARD_AGE,
+    ASK_ONBOARD_FULL_NAME,
+    ASK_ONBOARD_REGION,
     ASK_OPTIONS,
     ASK_QUESTION_TEXT,
     ASK_TIMER_SECONDS,
@@ -14,6 +17,9 @@ from .settings import AppSettings, load_settings
 __all__ = [
     "ASK_CORRECT_INDEX",
     "ASK_NUM_QUESTIONS",
+    "ASK_ONBOARD_AGE",
+    "ASK_ONBOARD_FULL_NAME",
+    "ASK_ONBOARD_REGION",
     "ASK_OPTIONS",
     "ASK_QUESTION_TEXT",
     "ASK_TIMER_SECONDS",

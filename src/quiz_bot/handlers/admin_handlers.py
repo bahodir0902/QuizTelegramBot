@@ -155,9 +155,33 @@ async def admin_callback_router(update: Update, context: ContextTypes.DEFAULT_TY
                 encoding="utf-8",
             ) as temp_file:
                 writer = csv.writer(temp_file)
-                writer.writerow(["username", "full_name", "score"])
+                writer.writerow(
+                    [
+                        "username",
+                        "full_name",
+                        "first_name",
+                        "last_name",
+                        "age",
+                        "region",
+                        "score",
+                        "last_duration_seconds",
+                    ]
+                )
                 for row in rows:
-                    writer.writerow([row["username"] or "", row["full_name"] or "", int(row["score"])])
+                    writer.writerow(
+                        [
+                            row["username"] or "",
+                            row["full_name"] or "",
+                            row["first_name"] or "",
+                            row["last_name"] or "",
+                            row["age"] if row["age"] is not None else "",
+                            row["region"] or "",
+                            int(row["score"]),
+                            row["last_duration_seconds"]
+                            if row["last_duration_seconds"] is not None
+                            else "",
+                        ]
+                    )
                 temp_path = temp_file.name
 
             chat_id = query.message.chat_id if query.message is not None else user_id
