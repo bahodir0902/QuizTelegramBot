@@ -7,8 +7,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "language_prompt": "Choose your language.",
         "language_updated": "Language updated to English.",
         "change_language_label": "Change Language",
+        "my_attempts_label": "📊 My attempts",
+        "my_profile_label": "👤 My information",
+        "channels_label": "📡 Channels",
+        "about_us_label": "ℹ️ About bot",
         "welcome": "Welcome to the Quiz Bot!\n\nTap *{start_quiz_label}* below when you are ready.",
-        "start_quiz_label": "Start Quiz",
+        "start_quiz_label": "📝 Tests",
         "quiz_started": "Quiz started! {count} question(s). Good luck!",
         "quiz_complete": "Quiz complete!\n\nYour score: *{score}* / {total}",
         "db_error": "Database error. Please try again later.",
@@ -103,8 +107,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "language_prompt": "Выберите язык.",
         "language_updated": "Язык переключен на русский.",
         "change_language_label": "Сменить язык",
+        "my_attempts_label": "📊 Мои попытки",
+        "my_profile_label": "👤 Мои данные",
+        "channels_label": "📡 Каналы",
+        "about_us_label": "ℹ️ О боте",
         "welcome": "Добро пожаловать в Quiz Bot!\n\nНажмите *{start_quiz_label}*, когда будете готовы.",
-        "start_quiz_label": "Начать викторину",
+        "start_quiz_label": "📝 Тесты",
         "quiz_started": "Викторина началась! Вопросов: {count}. Удачи!",
         "quiz_complete": "Викторина завершена!\n\nВаш результат: *{score}* / {total}",
         "db_error": "Ошибка базы данных. Попробуйте позже.",
@@ -199,8 +207,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "language_prompt": "Tilni tanlang.",
         "language_updated": "Til o'zbekchaga o'zgartirildi.",
         "change_language_label": "Tilni o'zgartirish",
+        "my_attempts_label": "📊 Urinishlarim",
+        "my_profile_label": "👤 Mening maʼlumotlarim",
+        "channels_label": "📡 Kanallar",
+        "about_us_label": "ℹ️ Bot haqida",
         "welcome": "Quiz Bot'ga xush kelibsiz!\n\nTayyor bo'lsangiz, pastdagi *{start_quiz_label}* tugmasini bosing.",
-        "start_quiz_label": "Testni Boshlash",
+        "start_quiz_label": "📝 Testlar",
         "quiz_started": "Test boshlandi! Savollar soni: {count}. Omad!",
         "quiz_complete": "Test tugadi!\n\nNatijangiz: *{score}* / {total}",
         "db_error": "Ma'lumotlar bazasi xatosi. Keyinroq urinib ko'ring.",
@@ -294,7 +306,6 @@ MESSAGES: dict[str, dict[str, str]] = {
 }
 
 COMMON_MESSAGES = {
-    "about_us_label": "About Us",
     "onboarding_name_prompt": "Let's create your profile. Send your first and last name.",
     "onboarding_name_invalid": "Please send both first and last name as text.",
     "onboarding_age_prompt": "Great. Now send your age as a number.",
@@ -314,3 +325,4 @@ for values in MESSAGES.values():
 START_QUIZ_LABELS = tuple(values["start_quiz_label"] for values in MESSAGES.values())
 CHANGE_LANGUAGE_LABELS = tuple(values["change_language_label"] for values in MESSAGES.values())
 ABOUT_US_LABELS = tuple(values["about_us_label"] for values in MESSAGES.values())
+ADMIN_DASHBOARD_LABELS = tuple(values["admin_dashboard"] for values in MESSAGES.values())

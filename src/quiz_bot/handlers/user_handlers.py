@@ -15,6 +15,7 @@ from quiz_bot.database import (
     adb_run,
     complete_onboarding_db,
     get_user_progress_db,
+    is_admin_user,
     save_onboarding_age_db,
     save_onboarding_name_db,
     set_onboarding_step_db,
@@ -29,6 +30,7 @@ from quiz_bot.keyboards import (
 )
 from quiz_bot.locales.messages import (
     ABOUT_US_LABELS,
+    ADMIN_DASHBOARD_LABELS,
     CHANGE_LANGUAGE_LABELS,
     START_QUIZ_LABELS,
 )
@@ -45,7 +47,9 @@ from quiz_bot.services.quiz_service import serve_question
 
 logger = logging.getLogger(__name__)
 
-MENU_LABELS = frozenset((*START_QUIZ_LABELS, *CHANGE_LANGUAGE_LABELS, *ABOUT_US_LABELS))
+MENU_LABELS = frozenset(
+    (*START_QUIZ_LABELS, *CHANGE_LANGUAGE_LABELS, *ABOUT_US_LABELS, *ADMIN_DASHBOARD_LABELS)
+)
 
 
 def _telegram_full_name(user) -> str:
@@ -81,7 +85,13 @@ async def _send_language_prompt(update: Update) -> None:
     )
 
 
-async def _send_welcome(update: Update, language_code: str) -> None:
+async def _is_admin(user_id: int) -> bool:
+    return await adb_run(lambda conn: is_admin_user(conn, user_id))
+
+
+async def _send_welcome(
+    update: Update, language_code: str, *, is_admin: bool = False
+) -> None:
     if update.message is None:
         return
     await update.message.reply_text(
@@ -91,7 +101,7 @@ async def _send_welcome(update: Update, language_code: str) -> None:
             start_quiz_label=translate(language_code, "start_quiz_label"),
         ),
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=main_reply_keyboard(language_code),
+        reply_markup=main_reply_keyboard(language_code, is_admin=is_admin),
     )
 
 
@@ -100,7 +110,10 @@ async def _send_next_step_after_onboarding(update: Update, progress) -> int:
     if progress["language_code"] in (None, ""):
         await _send_language_prompt(update)
         return ConversationHandler.END
-    await _send_welcome(update, language_code)
+    is_admin = False
+    if update.effective_user is not None:
+        is_admin = await _is_admin(update.effective_user.id)
+    await _send_welcome(update, language_code, is_admin=is_admin)
     return ConversationHandler.END
 
 
@@ -353,7 +366,7 @@ async def handle_start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     await update.message.reply_text(
         translate(language_code, "quiz_started", count=len(pool)),
-        reply_markup=main_reply_keyboard(language_code),
+        reply_markup=main_reply_keyboard(language_code, is_admin=await _is_admin(user_id)),
     )
     await serve_question(context, user_id, chat_id)
     return ConversationHandler.END
@@ -389,6 +402,8 @@ async def handle_about_us(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     about_text = getattr(settings, "about_us_text", DEFAULT_ABOUT_US_TEXT)
     await update.message.reply_text(
         about_text,
-        reply_markup=main_reply_keyboard(language_code),
+        reply_markup=main_reply_keyboard(
+            language_code, is_admin=await _is_admin(update.effective_user.id)
+        ),
     )
     return ConversationHandler.END
