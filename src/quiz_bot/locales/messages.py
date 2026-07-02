@@ -295,12 +295,17 @@ MESSAGES: dict[str, dict[str, str]] = {
 
 COMMON_MESSAGES = {
     "about_us_label": "About Us",
-    "onboarding_name_prompt": "Let's create your profile. Send your first and last name.",
-    "onboarding_name_invalid": "Please send both first and last name as text.",
-    "onboarding_age_prompt": "Great. Now send your age as a number.",
-    "onboarding_age_invalid": "Please send a valid age as a number between 1 and 120.",
-    "onboarding_region_prompt": "Choose your region or type your location.",
-    "onboarding_region_invalid": "Please send a region or location.",
+    "my_info_label": "My info",
+    "onboarding_name_prompt": "Full name",
+    "onboarding_name_invalid": "Please send a non-empty full name.",
+    "onboarding_phone_prompt": "Phone number",
+    "onboarding_phone_invalid": "Please send a valid phone number (7-15 digits, optional leading +).",
+    "onboarding_study_prompt": "Study place or home address",
+    "onboarding_study_invalid": "Please send a non-empty study place or home address.",
+    "onboarding_age_prompt": "Phone number",
+    "onboarding_age_invalid": "Please send a valid phone number (7-15 digits, optional leading +).",
+    "onboarding_region_prompt": "Study place or home address",
+    "onboarding_region_invalid": "Please send a non-empty study place or home address.",
     "onboarding_complete": "Registration complete.",
     "complete_registration_first": "Please complete registration before using this option.",
     "quiz_complete_timed": (
@@ -311,6 +316,29 @@ COMMON_MESSAGES = {
 for values in MESSAGES.values():
     values.update(COMMON_MESSAGES)
 
+MESSAGES["uz"].update({
+    "onboarding_name_prompt": "F.I.Sh",
+    "onboarding_phone_prompt": "Tel raqam",
+    "onboarding_age_prompt": "Tel raqam",
+    "onboarding_study_prompt": "Oʻqish joyi yoki yashash manzili",
+    "onboarding_region_prompt": "Oʻqish joyi yoki yashash manzili",
+})
+MESSAGES["ru"].update({
+    "onboarding_name_prompt": "Ф.И.О",
+    "onboarding_phone_prompt": "Телефонный номер",
+    "onboarding_age_prompt": "Телефонный номер",
+    "onboarding_study_prompt": "Место учёбы или адрес проживания",
+    "onboarding_region_prompt": "Место учёбы или адрес проживания",
+})
+MESSAGES["en"].update({
+    "onboarding_name_prompt": "Full name",
+    "onboarding_phone_prompt": "Phone number",
+    "onboarding_age_prompt": "Phone number",
+    "onboarding_study_prompt": "Study place or home address",
+    "onboarding_region_prompt": "Study place or home address",
+})
+
 START_QUIZ_LABELS = tuple(values["start_quiz_label"] for values in MESSAGES.values())
 CHANGE_LANGUAGE_LABELS = tuple(values["change_language_label"] for values in MESSAGES.values())
+MY_INFO_LABELS = tuple(values["my_info_label"] for values in MESSAGES.values())
 ABOUT_US_LABELS = tuple(values["about_us_label"] for values in MESSAGES.values())

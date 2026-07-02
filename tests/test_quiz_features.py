@@ -24,8 +24,11 @@ from quiz_bot.services.onboarding_service import (
     format_duration,
     parse_age,
     parse_full_name,
+    parse_phone_number,
+    parse_profile_full_name,
     parse_region,
 )
+from quiz_bot.services.localization_service import translate
 from quiz_bot.services.question_service import format_numbered_question
 from quiz_bot.services.quiz_progress import continue_quiz_or_finish
 from quiz_bot.services.quiz_service import serve_question
@@ -69,6 +72,30 @@ class OnboardingServiceTests(unittest.TestCase):
     def test_parse_region_normalizes_whitespace(self) -> None:
         self.assertEqual(parse_region("  Tashkent   City "), "Tashkent City")
         self.assertIsNone(parse_region("   "))
+
+
+    def test_profile_full_name_accepts_single_non_empty_value(self) -> None:
+        self.assertEqual(parse_profile_full_name(" Alice   B Smith "), "Alice B Smith")
+        self.assertIsNone(parse_profile_full_name("   "))
+
+    def test_parse_phone_number_accepts_basic_formats(self) -> None:
+        self.assertEqual(parse_phone_number("+998 90 123 45 67"), "+998 90 123 45 67")
+        self.assertEqual(parse_phone_number("(555) 123-4567"), "(555) 123-4567")
+        self.assertIsNone(parse_phone_number("123"))
+        self.assertIsNone(parse_phone_number("+998 abc 123"))
+        self.assertIsNone(parse_phone_number("90+1234567"))
+
+    def test_language_specific_onboarding_prompts(self) -> None:
+        self.assertEqual(translate("uz", "onboarding_name_prompt"), "F.I.Sh")
+        self.assertEqual(translate("ru", "onboarding_name_prompt"), "Ф.И.О")
+        self.assertEqual(translate("en", "onboarding_name_prompt"), "Full name")
+        self.assertEqual(translate("uz", "onboarding_phone_prompt"), "Tel raqam")
+        self.assertEqual(translate("ru", "onboarding_phone_prompt"), "Телефонный номер")
+        self.assertEqual(translate("en", "onboarding_phone_prompt"), "Phone number")
+        self.assertEqual(
+            translate("uz", "onboarding_study_prompt"),
+            "Oʻqish joyi yoki yashash manzili",
+        )
 
     def test_format_duration_handles_boundaries(self) -> None:
         self.assertEqual(format_duration(0), "0 seconds")
