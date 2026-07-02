@@ -346,6 +346,50 @@ def update_config_field_db(conn: sqlite3.Connection, column: str, value: int) ->
     conn.execute(f"UPDATE configs SET {column} = ? WHERE id = 1", (value,))
 
 
+
+def list_user_progress_rows_db(
+    conn: sqlite3.Connection,
+    *,
+    limit: int = 10,
+    offset: int = 0,
+) -> list[sqlite3.Row]:
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    if offset < 0:
+        raise ValueError("offset cannot be negative")
+    return list(
+        conn.execute(
+            """
+            SELECT
+                user_id,
+                username,
+                full_name,
+                first_name,
+                last_name,
+                age,
+                region,
+                language_code,
+                onboarding_completed,
+                onboarding_step,
+                onboarded_at,
+                score,
+                session_status,
+                start_time,
+                finished_time,
+                last_duration_seconds
+            FROM user_progress
+            ORDER BY user_id ASC
+            LIMIT ? OFFSET ?
+            """,
+            (limit, offset),
+        ).fetchall()
+    )
+
+
+def count_user_progress_rows_db(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT COUNT(*) AS count FROM user_progress").fetchone()
+    return int(row["count"] if row is not None else 0)
+
 def fetch_leaderboard_db(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return list(
         conn.execute(

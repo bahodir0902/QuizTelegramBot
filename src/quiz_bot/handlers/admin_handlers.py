@@ -29,6 +29,8 @@ from quiz_bot.config.constants import (
     CB_ADMIN_QUESTIONS,
     CB_ADMIN_SETTINGS,
     CB_ADMIN_STATS,
+    CB_ADMIN_USERS,
+    CB_ADMIN_USERS_PAGE_PREFIX,
     CB_QUESTION_DELETE_CONFIRM_PREFIX,
     CB_QUESTION_DELETE_OPTION_PREFIX,
     CB_QUESTION_DELETE_PREFIX,
@@ -48,10 +50,12 @@ from quiz_bot.database import (
     delete_question_option_db,
     fetch_export_rows_db,
     fetch_leaderboard_db,
+    count_user_progress_rows_db,
     fetch_question_db,
     fetch_question_stats_db,
     insert_question_db,
     is_admin_user,
+    list_user_progress_rows_db,
     list_questions_db,
     read_config,
     replace_question_options_db,
@@ -67,6 +71,7 @@ from quiz_bot.keyboards import (
     admin_question_options_keyboard,
     admin_questions_keyboard,
     admin_settings_keyboard,
+    admin_users_pagination_keyboard,
 )
 from quiz_bot.services.localization_service import language_for_user, translate
 from quiz_bot.utils.json import parse_options_json
@@ -160,6 +165,108 @@ async def _show_question_list(query, language_code: str) -> None:
     )
 
 
+ADMIN_USERS_PAGE_SIZE = 5
+
+
+def _admin_user_value(value: object, default: str = "—") -> str:
+    if value in (None, ""):
+        return default
+    return str(value)
+
+
+def _admin_user_profile(row: sqlite3.Row) -> str:
+    parts = [
+        _admin_user_value(row["first_name"]),
+        _admin_user_value(row["last_name"]),
+        _admin_user_value(row["age"]),
+        _admin_user_value(row["region"]),
+    ]
+    return " / ".join(parts)
+
+
+def _admin_user_status(row: sqlite3.Row, language_code: str) -> str:
+    if int(row["onboarding_completed"] or 0) == 1:
+        return translate(language_code, "admin_users_profile_completed")
+    return translate(
+        language_code,
+        "admin_users_profile_incomplete",
+        step=_admin_user_value(row["onboarding_step"], "not started"),
+    )
+
+
+def _admin_users_text(
+    rows: list[sqlite3.Row],
+    language_code: str,
+    *,
+    page: int,
+    total_count: int,
+    total_pages: int,
+) -> str:
+    lines = [
+        f"*{translate(language_code, 'admin_users_title', count=total_count, page=page, total_pages=total_pages)}*"
+    ]
+    for row in rows:
+        username = _admin_user_value(row["username"], "—")
+        lines.extend(
+            [
+                "",
+                translate(
+                    language_code,
+                    "admin_users_row",
+                    user_id=int(row["user_id"]),
+                    name=user_display_name(row),
+                    username=username,
+                    language=_admin_user_value(row["language_code"]),
+                    profile_status=_admin_user_status(row, language_code),
+                    score=int(row["score"] or 0),
+                    profile=_admin_user_profile(row),
+                    session_status=_admin_user_value(row["session_status"]),
+                    started=_admin_user_value(row["start_time"]),
+                    finished=_admin_user_value(row["finished_time"]),
+                ),
+            ]
+        )
+    return "\n".join(lines)
+
+
+async def _show_users_list(query, language_code: str, page: int = 1) -> None:
+    total_count = await adb_run(count_user_progress_rows_db)
+    if total_count == 0:
+        await safe_edit_message_text(
+            query,
+            translate(language_code, "admin_users_empty"),
+            reply_markup=admin_dashboard_keyboard(language_code),
+        )
+        return
+
+    total_pages = max(1, (total_count + ADMIN_USERS_PAGE_SIZE - 1) // ADMIN_USERS_PAGE_SIZE)
+    page = min(max(page, 1), total_pages)
+    offset = (page - 1) * ADMIN_USERS_PAGE_SIZE
+    rows = await adb_run(
+        lambda conn: list_user_progress_rows_db(
+            conn,
+            limit=ADMIN_USERS_PAGE_SIZE,
+            offset=offset,
+        )
+    )
+    await safe_edit_message_text(
+        query,
+        _admin_users_text(
+            rows,
+            language_code,
+            page=page,
+            total_count=total_count,
+            total_pages=total_pages,
+        ),
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=admin_users_pagination_keyboard(
+            language_code,
+            page=page,
+            total_pages=total_pages,
+        ),
+    )
+
+
 async def _show_question_detail(query, question_id: int, language_code: str) -> None:
     stats = await adb_run(lambda conn: fetch_question_stats_db(conn, question_id))
     if stats is None:
@@ -222,6 +329,32 @@ async def admin_callback_router(update: Update, context: ContextTypes.DEFAULT_TY
 
     data = query.data
     dashboard = admin_dashboard_keyboard(language_code)
+
+
+    if data == CB_ADMIN_USERS:
+        try:
+            await _show_users_list(query, language_code)
+        except (sqlite3.Error, ValueError):
+            logger.exception("Failed to load users list user_id=%s", user_id)
+            await safe_edit_message_text(
+                query,
+                translate(language_code, "admin_users_failed"),
+                reply_markup=dashboard,
+            )
+        return ConversationHandler.END
+
+    page = _callback_id(data, CB_ADMIN_USERS_PAGE_PREFIX)
+    if page is not None:
+        try:
+            await _show_users_list(query, language_code, page=page)
+        except (sqlite3.Error, ValueError):
+            logger.exception("Failed to load users page page=%s user_id=%s", page, user_id)
+            await safe_edit_message_text(
+                query,
+                translate(language_code, "admin_users_failed"),
+                reply_markup=dashboard,
+            )
+        return ConversationHandler.END
 
     if data == CB_ADMIN_STATS:
         try:
