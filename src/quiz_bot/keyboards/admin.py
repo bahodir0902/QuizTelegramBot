@@ -9,6 +9,7 @@ from quiz_bot.config.constants import (
     CB_ADMIN_BACK,
     CB_ADMIN_EXPORT,
     CB_ADMIN_QUESTIONS,
+    CB_ADMIN_CHANNELS,
     CB_ADMIN_SETTINGS,
     CB_ADMIN_STATS,
     CB_QUESTION_DELETE_CONFIRM_PREFIX,
@@ -21,6 +22,11 @@ from quiz_bot.config.constants import (
     CB_QUESTION_VIEW_PREFIX,
     CB_SET_LIMIT,
     CB_SET_TIMER,
+    CB_CHANNEL_ADD,
+    CB_CHANNEL_DELETE_CONFIRM_PREFIX,
+    CB_CHANNEL_DELETE_PREFIX,
+    CB_CHANNEL_EDIT_PREFIX,
+    CB_CHANNEL_TOGGLE_REQUIRE_PREFIX,
     CB_TOGGLE_OPT_SHUFFLE,
     CB_TOGGLE_Q_SHUFFLE,
 )
@@ -41,6 +47,12 @@ def admin_dashboard_keyboard(language_code: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     translate(language_code, "admin_manage_questions"),
                     callback_data=CB_ADMIN_QUESTIONS,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    translate(language_code, "admin_manage_channels"),
+                    callback_data=CB_ADMIN_CHANNELS,
                 )
             ],
             [
@@ -236,3 +248,22 @@ def admin_settings_keyboard(config: BotConfig, language_code: str) -> InlineKeyb
             ],
         ]
     )
+
+
+def admin_channels_keyboard(rows, language_code: str) -> InlineKeyboardMarkup:
+    buttons = [[InlineKeyboardButton(translate(language_code, "admin_add_channel"), callback_data=CB_CHANNEL_ADD)]]
+    for row in rows:
+        channel_id = int(row["id"])
+        state = translate(language_code, "admin_on" if int(row["require_join_before_test"]) else "admin_off")
+        label = f"#{channel_id} {_shorten(str(row['title']), 24)} ({state})"
+        buttons.append([InlineKeyboardButton(label, callback_data=f"{CB_CHANNEL_TOGGLE_REQUIRE_PREFIX}{channel_id}")])
+        buttons.append([
+            InlineKeyboardButton(translate(language_code, "admin_edit_channel"), callback_data=f"{CB_CHANNEL_EDIT_PREFIX}{channel_id}"),
+            InlineKeyboardButton(translate(language_code, "admin_delete_channel"), callback_data=f"{CB_CHANNEL_DELETE_CONFIRM_PREFIX}{channel_id}"),
+        ])
+    buttons.append([InlineKeyboardButton(translate(language_code, "admin_back"), callback_data=CB_ADMIN_BACK)])
+    return InlineKeyboardMarkup(buttons)
+
+
+def admin_channel_delete_keyboard(channel_id: int, language_code: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(translate(language_code, "admin_confirm_delete"), callback_data=f"{CB_CHANNEL_DELETE_PREFIX}{channel_id}")], [InlineKeyboardButton(translate(language_code, "admin_cancel_delete"), callback_data=CB_ADMIN_CHANNELS)]])

@@ -16,7 +16,9 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 from quiz_bot.config import (
+    ASK_CHANNEL_URL,
     ASK_CORRECT_INDEX,
+    ASK_EDIT_CHANNEL_URL,
     ASK_EDIT_CORRECT_INDEX,
     ASK_EDIT_OPTIONS,
     ASK_EDIT_QUESTION_TEXT,
@@ -30,10 +32,12 @@ from quiz_bot.config import (
     AppSettings,
 )
 from quiz_bot.handlers.admin_handlers import (
+    admin_add_channel_url,
     admin_add_correct_index,
     admin_add_options,
     admin_add_question_text,
     admin_callback_router,
+    admin_edit_channel_url,
     admin_edit_correct_index,
     admin_edit_options,
     admin_edit_question_text,
@@ -51,12 +55,14 @@ from quiz_bot.handlers.poll_handlers import handle_poll_answer
 from quiz_bot.handlers.user_handlers import (
     cmd_start,
     handle_about_us,
+    handle_channels_page,
     handle_onboarding_age,
     handle_onboarding_name,
     handle_onboarding_region,
     handle_start_quiz,
+    handle_subscription_check,
 )
-from quiz_bot.locales.messages import ABOUT_US_LABELS, CHANGE_LANGUAGE_LABELS, START_QUIZ_LABELS
+from quiz_bot.locales.messages import ABOUT_US_LABELS, CHANGE_LANGUAGE_LABELS, CHANNELS_LABELS, START_QUIZ_LABELS
 
 
 def _build_request(settings: AppSettings) -> HTTPXRequest:
@@ -73,6 +79,11 @@ def _start_quiz_regex() -> str:
 
 def _change_language_regex() -> str:
     escaped = [re.escape(label) for label in CHANGE_LANGUAGE_LABELS]
+    return "^(" + "|".join(escaped) + ")$"
+
+
+def _channels_regex() -> str:
+    escaped = [re.escape(label) for label in CHANNELS_LABELS]
     return "^(" + "|".join(escaped) + ")$"
 
 
@@ -97,8 +108,11 @@ def build_application(settings: AppSettings) -> Application:
             CallbackQueryHandler(admin_callback_router, pattern="^admin:"),
             CallbackQueryHandler(admin_callback_router, pattern="^settings:"),
             CallbackQueryHandler(admin_callback_router, pattern="^question:"),
+            CallbackQueryHandler(admin_callback_router, pattern="^channel:"),
         ],
         states={
+            ASK_CHANNEL_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_channel_url)],
+            ASK_EDIT_CHANNEL_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_channel_url)],
             ASK_QUESTION_TEXT: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
@@ -163,6 +177,7 @@ def build_application(settings: AppSettings) -> Application:
             CommandHandler("start", cmd_start),
             MessageHandler(filters.Regex(_start_quiz_regex()), handle_start_quiz),
             MessageHandler(filters.Regex(_about_us_regex()), handle_about_us),
+            MessageHandler(filters.Regex(_channels_regex()), handle_channels_page),
         ],
         states={
             ASK_ONBOARD_FULL_NAME: [
@@ -195,6 +210,7 @@ def build_application(settings: AppSettings) -> Application:
     app.add_handler(CommandHandler("language", cmd_language))
     app.add_handler(CommandHandler("admin", cmd_admin))
     app.add_handler(CallbackQueryHandler(handle_language_callback, pattern="^lang:"))
+    app.add_handler(CallbackQueryHandler(handle_subscription_check, pattern="^channels:check$"))
     app.add_handler(admin_conv)
     app.add_handler(
         MessageHandler(

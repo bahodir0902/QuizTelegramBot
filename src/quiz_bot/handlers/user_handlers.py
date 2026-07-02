@@ -15,6 +15,8 @@ from quiz_bot.database import (
     adb_run,
     complete_onboarding_db,
     get_user_progress_db,
+    list_channels_db,
+    list_required_channels_db,
     save_onboarding_age_db,
     save_onboarding_name_db,
     set_onboarding_step_db,
@@ -24,15 +26,18 @@ from quiz_bot.database import (
 from quiz_bot.domain import QuizStartError
 from quiz_bot.keyboards import (
     language_keyboard,
+    channels_inline_keyboard,
     main_reply_keyboard,
     region_reply_keyboard,
 )
 from quiz_bot.locales.messages import (
     ABOUT_US_LABELS,
+    CHANNELS_LABELS,
     CHANGE_LANGUAGE_LABELS,
     START_QUIZ_LABELS,
 )
-from quiz_bot.services.localization_service import resolve_language, translate
+from quiz_bot.services.channel_service import is_user_subscribed
+from quiz_bot.services.localization_service import language_for_user, resolve_language, translate
 from quiz_bot.services.onboarding_service import (
     is_onboarding_complete,
     next_onboarding_state,
@@ -45,7 +50,7 @@ from quiz_bot.services.quiz_service import serve_question
 
 logger = logging.getLogger(__name__)
 
-MENU_LABELS = frozenset((*START_QUIZ_LABELS, *CHANGE_LANGUAGE_LABELS, *ABOUT_US_LABELS))
+MENU_LABELS = frozenset((*START_QUIZ_LABELS, *CHANGE_LANGUAGE_LABELS, *ABOUT_US_LABELS, *CHANNELS_LABELS))
 
 
 def _telegram_full_name(user) -> str:
@@ -308,6 +313,52 @@ async def handle_onboarding_region(update: Update, context: ContextTypes.DEFAULT
     return await _send_next_step_after_onboarding(update, updated)
 
 
+async def _required_channel_status(context: ContextTypes.DEFAULT_TYPE, user_id: int):
+    channels = await adb_run(list_required_channels_db)
+    if not channels:
+        return [], [], False
+    missing = []
+    permission_issue = False
+    for channel in channels:
+        subscribed, error = await is_user_subscribed(context.bot, channel, user_id)
+        if error == "permission":
+            permission_issue = True
+        if not subscribed:
+            missing.append(channel)
+    return channels, missing, permission_issue
+
+
+async def _send_required_channels(message, language_code: str, channels, permission_issue: bool = False) -> None:
+    text = translate(language_code, "subscription_check_unavailable" if permission_issue else "join_required_channels")
+    await message.reply_text(text, reply_markup=channels_inline_keyboard(channels, language_code, include_check=True))
+
+
+async def _start_quiz_after_gate(update: Update, context: ContextTypes.DEFAULT_TYPE, language_code: str) -> int:
+    if update.effective_user is None:
+        return ConversationHandler.END
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id if update.effective_chat else user_id
+    try:
+        pool = await adb_run(lambda conn: start_quiz_session_db(conn, user_id), commit=True, immediate=True)
+    except QuizStartError as exc:
+        message_key = "no_questions" if str(exc) == "NO_QUESTIONS" else "empty_pool"
+        target = update.message or (update.callback_query.message if update.callback_query else None)
+        if target is not None:
+            await target.reply_text(translate(language_code, message_key))
+        return ConversationHandler.END
+    except sqlite3.Error:
+        logger.exception("SQLite error while starting quiz user_id=%s", user_id)
+        target = update.message or (update.callback_query.message if update.callback_query else None)
+        if target is not None:
+            await target.reply_text(translate(language_code, "db_error"))
+        return ConversationHandler.END
+    target = update.message or (update.callback_query.message if update.callback_query else None)
+    if target is not None:
+        await target.reply_text(translate(language_code, "quiz_started", count=len(pool)), reply_markup=main_reply_keyboard(language_code))
+    await serve_question(context, user_id, chat_id)
+    return ConversationHandler.END
+
+
 async def handle_start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.effective_user is None or update.message is None:
         return ConversationHandler.END
@@ -337,26 +388,17 @@ async def handle_start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return ConversationHandler.END
 
     try:
-        pool = await adb_run(
-            lambda conn: start_quiz_session_db(conn, user_id),
-            commit=True,
-            immediate=True,
-        )
-    except QuizStartError as exc:
-        message_key = "no_questions" if str(exc) == "NO_QUESTIONS" else "empty_pool"
-        await update.message.reply_text(translate(language_code, message_key))
-        return ConversationHandler.END
+        required, missing, permission_issue = await _required_channel_status(context, user_id)
     except sqlite3.Error:
-        logger.exception("SQLite error while starting quiz user_id=%s", user_id)
+        logger.exception("SQLite error while checking channels user_id=%s", user_id)
         await update.message.reply_text(translate(language_code, "db_error"))
         return ConversationHandler.END
+    if missing or permission_issue:
+        context.user_data["pending_test_start"] = True
+        await _send_required_channels(update.message, language_code, required, permission_issue)
+        return ConversationHandler.END
 
-    await update.message.reply_text(
-        translate(language_code, "quiz_started", count=len(pool)),
-        reply_markup=main_reply_keyboard(language_code),
-    )
-    await serve_question(context, user_id, chat_id)
-    return ConversationHandler.END
+    return await _start_quiz_after_gate(update, context, language_code)
 
 
 async def handle_about_us(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -392,3 +434,31 @@ async def handle_about_us(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         reply_markup=main_reply_keyboard(language_code),
     )
     return ConversationHandler.END
+
+
+async def handle_channels_page(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    del context
+    if update.effective_user is None or update.message is None:
+        return ConversationHandler.END
+    progress = await _ensure_user_progress(update)
+    language_code = _progress_language(progress)
+    rows = await adb_run(list_channels_db)
+    if not rows:
+        await update.message.reply_text(translate(language_code, "channels_empty"), reply_markup=main_reply_keyboard(language_code))
+        return ConversationHandler.END
+    await update.message.reply_text(translate(language_code, "channels_title"), reply_markup=channels_inline_keyboard(rows, language_code))
+    return ConversationHandler.END
+
+
+async def handle_subscription_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query is None or update.effective_user is None:
+        return ConversationHandler.END
+    await query.answer()
+    language_code = await language_for_user(update.effective_user.id)
+    required, missing, permission_issue = await _required_channel_status(context, update.effective_user.id)
+    if missing or permission_issue:
+        await query.message.reply_text(translate(language_code, "subscription_check_unavailable" if permission_issue else "subscription_still_required"), reply_markup=channels_inline_keyboard(required, language_code, include_check=True))
+        return ConversationHandler.END
+    await query.message.reply_text(translate(language_code, "subscription_verified"))
+    return await _start_quiz_after_gate(update, context, language_code)

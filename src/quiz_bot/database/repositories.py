@@ -703,3 +703,75 @@ def seed_admin_db(conn: sqlite3.Connection, user_id: int) -> None:
         "INSERT OR IGNORE INTO admins (user_id) VALUES (?)",
         (user_id,),
     )
+
+
+def create_channel_db(
+    conn: sqlite3.Connection,
+    title: str,
+    url: str,
+    username: str | None,
+    require_join_before_test: bool = False,
+) -> sqlite3.Row:
+    now = _to_db_timestamp(_utc_now())
+    cursor = conn.execute(
+        """
+        INSERT INTO channels (title, url, username, require_join_before_test, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (title, url, username, 1 if require_join_before_test else 0, now, now),
+    )
+    row = fetch_channel_db(conn, int(cursor.lastrowid))
+    if row is None:
+        raise RuntimeError("channel row missing after insert")
+    return row
+
+
+def list_channels_db(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return list(conn.execute("SELECT * FROM channels ORDER BY id ASC").fetchall())
+
+
+def fetch_channel_db(conn: sqlite3.Connection, channel_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM channels WHERE id = ?", (channel_id,)).fetchone()
+
+
+def list_required_channels_db(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            "SELECT * FROM channels WHERE require_join_before_test = 1 ORDER BY id ASC"
+        ).fetchall()
+    )
+
+
+def update_channel_db(
+    conn: sqlite3.Connection,
+    channel_id: int,
+    title: str,
+    url: str,
+    username: str | None,
+) -> bool:
+    cursor = conn.execute(
+        """
+        UPDATE channels
+        SET title = ?, url = ?, username = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (title, url, username, _to_db_timestamp(_utc_now()), channel_id),
+    )
+    return cursor.rowcount == 1
+
+
+def delete_channel_db(conn: sqlite3.Connection, channel_id: int) -> bool:
+    cursor = conn.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
+    return cursor.rowcount == 1
+
+
+def toggle_channel_required_db(conn: sqlite3.Connection, channel_id: int) -> sqlite3.Row | None:
+    row = fetch_channel_db(conn, channel_id)
+    if row is None:
+        return None
+    new_value = 0 if int(row["require_join_before_test"]) else 1
+    conn.execute(
+        "UPDATE channels SET require_join_before_test = ?, updated_at = ? WHERE id = ?",
+        (new_value, _to_db_timestamp(_utc_now()), channel_id),
+    )
+    return fetch_channel_db(conn, channel_id)

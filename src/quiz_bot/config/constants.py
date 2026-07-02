@@ -11,6 +11,8 @@ ASK_EDIT_CORRECT_INDEX = 7
 ASK_ONBOARD_FULL_NAME = 10
 ASK_ONBOARD_AGE = 11
 ASK_ONBOARD_REGION = 12
+ASK_CHANNEL_URL = 20
+ASK_EDIT_CHANNEL_URL = 21
 
 SUPPORTED_LANGUAGES = ("en", "ru", "uz")
 
@@ -20,6 +22,7 @@ CB_ADMIN_STATS = "admin:stats"
 CB_ADMIN_EXPORT = "admin:export"
 CB_ADMIN_BACK = "admin:back"
 CB_ADMIN_QUESTIONS = "admin:questions"
+CB_ADMIN_CHANNELS = "admin:channels"
 CB_SET_LIMIT = "settings:limit"
 CB_TOGGLE_Q_SHUFFLE = "settings:q_shuffle"
 CB_TOGGLE_OPT_SHUFFLE = "settings:opt_shuffle"
@@ -33,3 +36,11 @@ CB_QUESTION_DELETE_CONFIRM_PREFIX = "question:delete_confirm:"
 CB_QUESTION_DELETE_PREFIX = "question:delete:"
 CB_QUESTION_OPTIONS_PREFIX = "question:options:"
 CB_QUESTION_DELETE_OPTION_PREFIX = "question:delete_option:"
+
+CB_CHANNEL_ADD = "channel:add"
+CB_CHANNEL_TOGGLE_REQUIRE_PREFIX = "channel:toggle:"
+CB_CHANNEL_EDIT_PREFIX = "channel:edit:"
+CB_CHANNEL_DELETE_CONFIRM_PREFIX = "channel:delete_confirm:"
+CB_CHANNEL_DELETE_PREFIX = "channel:delete:"
+CB_USER_CHANNELS = "user:channels"
+CB_CHECK_SUBSCRIPTION = "channels:check"
