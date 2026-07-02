@@ -27,6 +27,7 @@ from quiz_bot.database import (
     init_database,
     insert_question_db,
     list_questions_db,
+    list_registered_users_db,
     read_config,
     replace_question_options_db,
     save_onboarding_age_db,
@@ -125,6 +126,17 @@ class DatabaseLayerTests(unittest.TestCase):
         self.assertIsNotNone(row["start_time"])
         self.assertIsNone(row["finished_time"])
         self.assertIsNone(row["last_duration_seconds"])
+
+
+    def test_list_registered_users_orders_by_user_id(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 42, "alice", "Alice")
+        upsert_user_db(conn, 7, "bob", "Bob")
+        conn.commit()
+
+        rows = list_registered_users_db(conn)
+
+        self.assertEqual([int(row["user_id"]) for row in rows], [7, 42])
 
     def test_new_user_requires_onboarding_by_default(self) -> None:
         conn = self.open_conn()

@@ -16,6 +16,8 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 from quiz_bot.config import (
+    ASK_BROADCAST_CONFIRM,
+    ASK_BROADCAST_TEXT,
     ASK_CORRECT_INDEX,
     ASK_EDIT_CORRECT_INDEX,
     ASK_EDIT_OPTIONS,
@@ -33,6 +35,8 @@ from quiz_bot.handlers.admin_handlers import (
     admin_add_correct_index,
     admin_add_options,
     admin_add_question_text,
+    admin_broadcast_confirm,
+    admin_broadcast_text,
     admin_callback_router,
     admin_edit_correct_index,
     admin_edit_options,
@@ -97,6 +101,7 @@ def build_application(settings: AppSettings) -> Application:
             CallbackQueryHandler(admin_callback_router, pattern="^admin:"),
             CallbackQueryHandler(admin_callback_router, pattern="^settings:"),
             CallbackQueryHandler(admin_callback_router, pattern="^question:"),
+            CallbackQueryHandler(admin_broadcast_confirm, pattern="^broadcast:"),
         ],
         states={
             ASK_QUESTION_TEXT: [
@@ -146,6 +151,15 @@ def build_application(settings: AppSettings) -> Application:
                     filters.TEXT & ~filters.COMMAND,
                     admin_edit_correct_index,
                 )
+            ],
+            ASK_BROADCAST_TEXT: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    admin_broadcast_text,
+                )
+            ],
+            ASK_BROADCAST_CONFIRM: [
+                CallbackQueryHandler(admin_broadcast_confirm, pattern="^broadcast:"),
             ],
         },
         fallbacks=[CommandHandler("cancel", cmd_cancel)],

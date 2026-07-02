@@ -23,8 +23,13 @@ from quiz_bot.config.constants import (
     ASK_OPTIONS,
     ASK_QUESTION_TEXT,
     ASK_TIMER_SECONDS,
+    ASK_BROADCAST_TEXT,
+    ASK_BROADCAST_CONFIRM,
     CB_ADMIN_ADD,
     CB_ADMIN_BACK,
+    CB_ADMIN_BROADCAST,
+    CB_BROADCAST_CANCEL,
+    CB_BROADCAST_SEND,
     CB_ADMIN_EXPORT,
     CB_ADMIN_QUESTIONS,
     CB_ADMIN_SETTINGS,
@@ -52,6 +57,7 @@ from quiz_bot.database import (
     fetch_question_stats_db,
     insert_question_db,
     is_admin_user,
+    list_registered_users_db,
     list_questions_db,
     read_config,
     replace_question_options_db,
@@ -61,6 +67,7 @@ from quiz_bot.database import (
     update_question_text_db,
 )
 from quiz_bot.keyboards import (
+    admin_broadcast_confirm_keyboard,
     admin_dashboard_keyboard,
     admin_question_delete_keyboard,
     admin_question_detail_keyboard,
@@ -560,6 +567,15 @@ async def admin_callback_router(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return ConversationHandler.END
 
+    if data == CB_ADMIN_BROADCAST:
+        context.user_data.pop("broadcast_text", None)
+        await safe_edit_message_text(
+            query,
+            translate(language_code, "admin_broadcast_prompt"),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return ASK_BROADCAST_TEXT
+
     if data == CB_ADMIN_ADD:
         await safe_edit_message_text(
             query,
@@ -900,5 +916,94 @@ async def admin_set_timer(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text(
         translate(language_code, message_key, value=value),
         reply_markup=admin_settings_keyboard(config, language_code),
+    )
+    return ConversationHandler.END
+
+
+async def admin_broadcast_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    language_code = await _admin_language(update)
+    if update.message is None or update.effective_user is None:
+        return ConversationHandler.END
+    if not await adb_run(lambda conn: is_admin_user(conn, update.effective_user.id)):
+        await update.message.reply_text(translate(language_code, "permission_denied"))
+        return ConversationHandler.END
+
+    text = (update.message.text or "").strip()
+    if not text:
+        await update.message.reply_text(translate(language_code, "admin_broadcast_empty"))
+        return ASK_BROADCAST_TEXT
+
+    context.user_data["broadcast_text"] = text
+    await update.message.reply_text(
+        translate(language_code, "admin_broadcast_confirm_prompt", message=text),
+        reply_markup=admin_broadcast_confirm_keyboard(language_code),
+    )
+    return ASK_BROADCAST_CONFIRM
+
+
+async def admin_broadcast_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query is None or query.data is None or update.effective_user is None:
+        return ConversationHandler.END
+
+    await query.answer()
+    user_id = update.effective_user.id
+    language_code = await language_for_user(user_id)
+    dashboard = admin_dashboard_keyboard(language_code)
+
+    if not await adb_run(lambda conn: is_admin_user(conn, user_id)):
+        await safe_edit_message_text(query, translate(language_code, "permission_denied"))
+        return ConversationHandler.END
+
+    if query.data == CB_BROADCAST_CANCEL:
+        context.user_data.pop("broadcast_text", None)
+        await safe_edit_message_text(
+            query,
+            translate(language_code, "admin_broadcast_cancelled"),
+            reply_markup=dashboard,
+        )
+        return ConversationHandler.END
+
+    if query.data != CB_BROADCAST_SEND:
+        return ASK_BROADCAST_CONFIRM
+
+    text = str(context.user_data.get("broadcast_text", "")).strip()
+    if not text:
+        await safe_edit_message_text(query, translate(language_code, "admin_broadcast_empty"))
+        return ASK_BROADCAST_TEXT
+
+    try:
+        users = await adb_run(list_registered_users_db)
+    except sqlite3.Error:
+        logger.exception("SQLite error while loading broadcast recipients admin_user_id=%s", user_id)
+        await safe_edit_message_text(query, translate(language_code, "db_error"), reply_markup=dashboard)
+        return ConversationHandler.END
+
+    success_count = 0
+    failure_count = 0
+    for row in users:
+        recipient_id = int(row["user_id"])
+        try:
+            await context.bot.send_message(chat_id=recipient_id, text=text)
+            success_count += 1
+        except TelegramError:
+            failure_count += 1
+            logger.warning(
+                "Failed to send broadcast recipient_user_id=%s admin_user_id=%s",
+                recipient_id,
+                user_id,
+                exc_info=True,
+            )
+
+    context.user_data.pop("broadcast_text", None)
+    await safe_edit_message_text(
+        query,
+        translate(
+            language_code,
+            "admin_broadcast_report",
+            success=success_count,
+            failure=failure_count,
+        ),
+        reply_markup=dashboard,
     )
     return ConversationHandler.END
