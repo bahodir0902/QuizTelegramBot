@@ -42,6 +42,13 @@ from quiz_bot.services.onboarding_service import (
     state_to_step,
 )
 from quiz_bot.services.quiz_service import serve_question
+from quiz_bot.services.subscription_service import (
+    CHECK_SUBSCRIPTION_CALLBACK,
+    check_quiz_start_subscription,
+    pop_pending_start_test_intent,
+    store_pending_start_test_intent,
+    subscription_required_keyboard,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -308,6 +315,56 @@ async def handle_onboarding_region(update: Update, context: ContextTypes.DEFAULT
     return await _send_next_step_after_onboarding(update, updated)
 
 
+async def _start_quiz_after_preflight(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    progress,
+    language_code: str,
+    chat_id: int,
+) -> int:
+    if update.effective_user is None:
+        return ConversationHandler.END
+    user_id = update.effective_user.id
+
+    try:
+        preflight = await check_quiz_start_subscription(context, user_id)
+    except sqlite3.Error:
+        logger.exception("SQLite error while checking quiz preflight user_id=%s", user_id)
+        await update.effective_message.reply_text(translate(language_code, "db_error"))
+        return ConversationHandler.END
+
+    if not preflight.allowed:
+        store_pending_start_test_intent(context)
+        await update.effective_message.reply_text(
+            translate(language_code, "subscription_required"),
+            reply_markup=subscription_required_keyboard(language_code),
+        )
+        return ConversationHandler.END
+
+    try:
+        pool = await adb_run(
+            lambda conn: start_quiz_session_db(conn, user_id),
+            commit=True,
+            immediate=True,
+        )
+    except QuizStartError as exc:
+        message_key = "no_questions" if str(exc) == "NO_QUESTIONS" else "empty_pool"
+        await update.effective_message.reply_text(translate(language_code, message_key))
+        return ConversationHandler.END
+    except sqlite3.Error:
+        logger.exception("SQLite error while starting quiz user_id=%s", user_id)
+        await update.effective_message.reply_text(translate(language_code, "db_error"))
+        return ConversationHandler.END
+
+    await update.effective_message.reply_text(
+        translate(language_code, "quiz_started", count=len(pool)),
+        reply_markup=main_reply_keyboard(language_code),
+    )
+    await serve_question(context, user_id, chat_id)
+    return ConversationHandler.END
+
+
 async def handle_start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if update.effective_user is None or update.message is None:
         return ConversationHandler.END
@@ -336,27 +393,37 @@ async def handle_start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await _send_language_prompt(update)
         return ConversationHandler.END
 
-    try:
-        pool = await adb_run(
-            lambda conn: start_quiz_session_db(conn, user_id),
-            commit=True,
-            immediate=True,
-        )
-    except QuizStartError as exc:
-        message_key = "no_questions" if str(exc) == "NO_QUESTIONS" else "empty_pool"
-        await update.message.reply_text(translate(language_code, message_key))
+    return await _start_quiz_after_preflight(
+        update,
+        context,
+        progress=progress,
+        language_code=language_code,
+        chat_id=chat_id,
+    )
+
+
+async def handle_subscription_check(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query is None or update.effective_user is None:
         return ConversationHandler.END
-    except sqlite3.Error:
-        logger.exception("SQLite error while starting quiz user_id=%s", user_id)
-        await update.message.reply_text(translate(language_code, "db_error"))
+    await query.answer()
+    if query.data != CHECK_SUBSCRIPTION_CALLBACK or not pop_pending_start_test_intent(context):
         return ConversationHandler.END
 
-    await update.message.reply_text(
-        translate(language_code, "quiz_started", count=len(pool)),
-        reply_markup=main_reply_keyboard(language_code),
+    progress = await _ensure_user_progress(update)
+    language_code = _progress_language(progress)
+    if progress is None or not is_onboarding_complete(progress):
+        await query.message.reply_text(translate(language_code, "send_start_first"))
+        return ConversationHandler.END
+
+    chat_id = update.effective_chat.id if update.effective_chat else update.effective_user.id
+    return await _start_quiz_after_preflight(
+        update,
+        context,
+        progress=progress,
+        language_code=language_code,
+        chat_id=chat_id,
     )
-    await serve_question(context, user_id, chat_id)
-    return ConversationHandler.END
 
 
 async def handle_about_us(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

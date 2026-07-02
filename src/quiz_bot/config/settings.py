@@ -29,6 +29,7 @@ class AppSettings:
     write_timeout: float
     pool_timeout: float
     about_us_text: str
+    required_channel_ids: tuple[str, ...] = tuple()
 
 
 def _load_dotenv() -> None:
@@ -42,6 +43,10 @@ def _load_dotenv() -> None:
     default_path = Path.cwd() / ".env"
     if default_path.is_file():
         load_dotenv(default_path)
+
+
+def _parse_csv_values(raw: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
 
 
 def _parse_admin_ids(raw: str) -> tuple[int, ...]:
@@ -71,6 +76,7 @@ def load_settings() -> AppSettings:
 
     raw_admin_ids = os.getenv("INITIAL_ADMIN_IDS", "").strip()
     admin_ids = _parse_admin_ids(raw_admin_ids) if raw_admin_ids else tuple()
+    required_channel_ids = _parse_csv_values(os.getenv("REQUIRED_CHANNEL_IDS", ""))
 
     default_language = os.getenv("DEFAULT_LANGUAGE", "en").strip().lower() or "en"
 
@@ -88,4 +94,5 @@ def load_settings() -> AppSettings:
         pool_timeout=float(os.getenv("TG_POOL_TIMEOUT", "10")),
         about_us_text=os.getenv("ABOUT_US_TEXT", DEFAULT_ABOUT_US_TEXT).strip()
         or DEFAULT_ABOUT_US_TEXT,
+        required_channel_ids=required_channel_ids,
     )
