@@ -105,6 +105,28 @@ def set_user_language_db(conn: sqlite3.Connection, user_id: int, language_code: 
     )
 
 
+def load_profile_db(conn: sqlite3.Connection, user_id: int) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT user_id, profile_full_name, profile_phone_number,
+               profile_study_or_address, profile_updated_at, onboarding_completed
+        FROM user_progress
+        WHERE user_id = ?
+        """,
+        (user_id,),
+    ).fetchone()
+
+
+def _touch_profile_sql(field_assignment: str) -> str:
+    return f"""
+        UPDATE user_progress
+        SET {field_assignment},
+            profile_updated_at = ?,
+            onboarding_completed = 0
+        WHERE user_id = ?
+        """
+
+
 def set_onboarding_step_db(conn: sqlite3.Connection, user_id: int, step: str) -> None:
     conn.execute(
         """
@@ -117,25 +139,90 @@ def set_onboarding_step_db(conn: sqlite3.Connection, user_id: int, step: str) ->
     )
 
 
+def save_profile_full_name_db(conn: sqlite3.Connection, user_id: int, full_name: str) -> None:
+    normalized = " ".join(full_name.strip().split())
+    parts = normalized.split(maxsplit=1)
+    first_name = parts[0] if parts else None
+    last_name = parts[1] if len(parts) > 1 else None
+    conn.execute(
+        _touch_profile_sql(
+            "profile_full_name = ?, full_name = ?, first_name = ?, "
+            "last_name = ?, onboarding_step = 'phone_number'"
+        ),
+        (
+            normalized,
+            normalized,
+            first_name,
+            last_name,
+            _to_db_timestamp(_utc_now()),
+            user_id,
+        ),
+    )
+
+
+def save_profile_phone_number_db(
+    conn: sqlite3.Connection, user_id: int, phone_number: str
+) -> None:
+    normalized = " ".join(phone_number.strip().split())
+    conn.execute(
+        _touch_profile_sql(
+            "profile_phone_number = ?, onboarding_step = 'study_or_address'"
+        ),
+        (normalized, _to_db_timestamp(_utc_now()), user_id),
+    )
+
+
+def save_profile_study_or_address_db(
+    conn: sqlite3.Connection, user_id: int, study_or_address: str
+) -> None:
+    normalized = " ".join(study_or_address.strip().split())
+    conn.execute(
+        _touch_profile_sql(
+            "profile_study_or_address = ?, region = ?, onboarding_step = NULL"
+        ),
+        (normalized, normalized, _to_db_timestamp(_utc_now()), user_id),
+    )
+
+
+def mark_profile_completed_db(conn: sqlite3.Connection, user_id: int) -> sqlite3.Row:
+    conn.execute(
+        """
+        UPDATE user_progress
+        SET onboarding_completed = 1,
+            onboarding_step = NULL,
+            onboarded_at = COALESCE(onboarded_at, ?),
+            profile_updated_at = ?
+        WHERE user_id = ?
+        """,
+        (_to_db_timestamp(_utc_now()), _to_db_timestamp(_utc_now()), user_id),
+    )
+    row = get_user_progress_db(conn, user_id)
+    if row is None:
+        raise RuntimeError("user_progress row missing after profile completion")
+    return row
+
+
+def update_profile_from_my_info_db(
+    conn: sqlite3.Connection,
+    user_id: int,
+    *,
+    full_name: str,
+    phone_number: str,
+    study_or_address: str,
+) -> sqlite3.Row:
+    save_profile_full_name_db(conn, user_id, full_name)
+    save_profile_phone_number_db(conn, user_id, phone_number)
+    save_profile_study_or_address_db(conn, user_id, study_or_address)
+    return mark_profile_completed_db(conn, user_id)
+
+
 def save_onboarding_name_db(
     conn: sqlite3.Connection,
     user_id: int,
     first_name: str,
     last_name: str,
 ) -> None:
-    full_name = f"{first_name} {last_name}".strip()
-    conn.execute(
-        """
-        UPDATE user_progress
-        SET first_name = ?,
-            last_name = ?,
-            full_name = ?,
-            onboarding_step = 'age',
-            onboarding_completed = 0
-        WHERE user_id = ?
-        """,
-        (first_name, last_name, full_name, user_id),
-    )
+    save_profile_full_name_db(conn, user_id, f"{first_name} {last_name}".strip())
 
 
 def save_onboarding_age_db(conn: sqlite3.Connection, user_id: int, age: int) -> None:
@@ -143,7 +230,7 @@ def save_onboarding_age_db(conn: sqlite3.Connection, user_id: int, age: int) -> 
         """
         UPDATE user_progress
         SET age = ?,
-            onboarding_step = 'region',
+            onboarding_step = 'study_or_address',
             onboarding_completed = 0
         WHERE user_id = ?
         """,
@@ -152,21 +239,8 @@ def save_onboarding_age_db(conn: sqlite3.Connection, user_id: int, age: int) -> 
 
 
 def complete_onboarding_db(conn: sqlite3.Connection, user_id: int, region: str) -> sqlite3.Row:
-    conn.execute(
-        """
-        UPDATE user_progress
-        SET region = ?,
-            onboarding_completed = 1,
-            onboarding_step = NULL,
-            onboarded_at = ?
-        WHERE user_id = ?
-        """,
-        (region, _to_db_timestamp(_utc_now()), user_id),
-    )
-    row = get_user_progress_db(conn, user_id)
-    if row is None:
-        raise RuntimeError("user_progress row missing after onboarding completion")
-    return row
+    save_profile_study_or_address_db(conn, user_id, region)
+    return mark_profile_completed_db(conn, user_id)
 
 
 def get_user_by_poll_id_db(conn: sqlite3.Connection, poll_id: str) -> sqlite3.Row | None:

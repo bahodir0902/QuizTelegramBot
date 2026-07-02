@@ -23,6 +23,7 @@ from quiz_bot.database import (
     fetch_question_db,
     fetch_question_stats_db,
     get_user_progress_db,
+    load_profile_db,
     increment_score_and_advance_db,
     init_database,
     insert_question_db,
@@ -31,6 +32,11 @@ from quiz_bot.database import (
     replace_question_options_db,
     save_onboarding_age_db,
     save_onboarding_name_db,
+    save_profile_full_name_db,
+    save_profile_phone_number_db,
+    save_profile_study_or_address_db,
+    mark_profile_completed_db,
+    update_profile_from_my_info_db,
     save_quiz_pool_db,
     score_poll_answer_db,
     start_quiz_session_db,
@@ -191,6 +197,48 @@ class DatabaseLayerTests(unittest.TestCase):
         assert row is not None
         self.assertEqual(int(row["onboarding_completed"]), 1)
         self.assertIsNone(row["onboarding_step"])
+
+
+    def test_profile_single_source_of_truth_is_saved_and_loaded(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 144, "student", "Telegram Name")
+        save_profile_full_name_db(conn, 144, "Alice Smith")
+        save_profile_phone_number_db(conn, 144, "+998 90 123 45 67")
+        save_profile_study_or_address_db(conn, 144, "Samarkand State University")
+        completed = mark_profile_completed_db(conn, 144)
+        profile = load_profile_db(conn, 144)
+
+        self.assertEqual(completed["profile_full_name"], "Alice Smith")
+        self.assertEqual(completed["profile_phone_number"], "+998 90 123 45 67")
+        self.assertEqual(completed["profile_study_or_address"], "Samarkand State University")
+        self.assertEqual(int(completed["onboarding_completed"]), 1)
+        self.assertIsNotNone(completed["profile_updated_at"])
+        self.assertIsNotNone(profile)
+        assert profile is not None
+        self.assertEqual(profile["profile_full_name"], "Alice Smith")
+
+    def test_update_profile_from_my_info_replaces_completed_profile(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 145, "student", "Telegram Name")
+        update_profile_from_my_info_db(
+            conn,
+            145,
+            full_name="Old Name",
+            phone_number="+998901111111",
+            study_or_address="Old Address",
+        )
+        updated = update_profile_from_my_info_db(
+            conn,
+            145,
+            full_name="New Name",
+            phone_number="+998902222222",
+            study_or_address="New Address",
+        )
+
+        self.assertEqual(updated["profile_full_name"], "New Name")
+        self.assertEqual(updated["profile_phone_number"], "+998902222222")
+        self.assertEqual(updated["profile_study_or_address"], "New Address")
+        self.assertEqual(int(updated["onboarding_completed"]), 1)
 
     def test_complete_quiz_session_stores_duration(self) -> None:
         conn = self.open_conn()

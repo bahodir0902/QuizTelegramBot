@@ -37,6 +37,10 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
             last_name TEXT,
             age INTEGER,
             region TEXT,
+            profile_full_name TEXT,
+            profile_phone_number TEXT,
+            profile_study_or_address TEXT,
+            profile_updated_at TIMESTAMP,
             onboarding_completed INTEGER NOT NULL DEFAULT 0,
             onboarding_step TEXT,
             onboarded_at TIMESTAMP,
@@ -82,6 +86,14 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE user_progress ADD COLUMN age INTEGER")
     if "region" not in columns:
         conn.execute("ALTER TABLE user_progress ADD COLUMN region TEXT")
+    if "profile_full_name" not in columns:
+        conn.execute("ALTER TABLE user_progress ADD COLUMN profile_full_name TEXT")
+    if "profile_phone_number" not in columns:
+        conn.execute("ALTER TABLE user_progress ADD COLUMN profile_phone_number TEXT")
+    if "profile_study_or_address" not in columns:
+        conn.execute("ALTER TABLE user_progress ADD COLUMN profile_study_or_address TEXT")
+    if "profile_updated_at" not in columns:
+        conn.execute("ALTER TABLE user_progress ADD COLUMN profile_updated_at TIMESTAMP")
     onboarding_column_existed = "onboarding_completed" in columns
     if "onboarding_completed" not in columns:
         conn.execute(
@@ -109,7 +121,9 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
             """
             UPDATE user_progress
             SET onboarding_completed = 1,
-                onboarding_step = NULL
+                onboarding_step = NULL,
+                profile_full_name = COALESCE(profile_full_name, full_name),
+                profile_study_or_address = COALESCE(profile_study_or_address, region)
             """
         )
 

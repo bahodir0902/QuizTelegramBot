@@ -15,8 +15,8 @@ from quiz_bot.database import (
     adb_run,
     complete_onboarding_db,
     get_user_progress_db,
-    save_onboarding_age_db,
-    save_onboarding_name_db,
+    save_profile_full_name_db,
+    save_profile_phone_number_db,
     set_onboarding_step_db,
     start_quiz_session_db,
     upsert_user_db,
@@ -30,14 +30,15 @@ from quiz_bot.keyboards import (
 from quiz_bot.locales.messages import (
     ABOUT_US_LABELS,
     CHANGE_LANGUAGE_LABELS,
+    MY_INFO_LABELS,
     START_QUIZ_LABELS,
 )
 from quiz_bot.services.localization_service import resolve_language, translate
 from quiz_bot.services.onboarding_service import (
     is_onboarding_complete,
     next_onboarding_state,
-    parse_age,
-    parse_full_name,
+    parse_phone_number,
+    parse_profile_full_name,
     parse_region,
     state_to_step,
 )
@@ -45,7 +46,9 @@ from quiz_bot.services.quiz_service import serve_question
 
 logger = logging.getLogger(__name__)
 
-MENU_LABELS = frozenset((*START_QUIZ_LABELS, *CHANGE_LANGUAGE_LABELS, *ABOUT_US_LABELS))
+MENU_LABELS = frozenset(
+    (*START_QUIZ_LABELS, *CHANGE_LANGUAGE_LABELS, *ABOUT_US_LABELS, *MY_INFO_LABELS)
+)
 
 
 def _telegram_full_name(user) -> str:
@@ -124,14 +127,14 @@ async def _prompt_onboarding_step(update: Update, progress) -> int:
 
     if state == ASK_ONBOARD_AGE:
         await update.message.reply_text(
-            translate(language_code, "onboarding_age_prompt"),
+            translate(language_code, "onboarding_phone_prompt"),
             reply_markup=ReplyKeyboardRemove(),
         )
         return ASK_ONBOARD_AGE
 
     if state == ASK_ONBOARD_REGION:
         await update.message.reply_text(
-            translate(language_code, "onboarding_region_prompt"),
+            translate(language_code, "onboarding_study_prompt"),
             reply_markup=region_reply_keyboard(),
         )
         return ASK_ONBOARD_REGION
@@ -186,21 +189,20 @@ async def handle_onboarding_name(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text(translate("en", "db_error"))
         return ConversationHandler.END
     language_code = _progress_language(progress)
-    parsed = None if raw.strip() in MENU_LABELS else parse_full_name(raw)
+    parsed = None if raw.strip() in MENU_LABELS else parse_profile_full_name(raw)
     if parsed is None:
         await update.message.reply_text(
             translate(language_code, "onboarding_name_invalid")
         )
         return ASK_ONBOARD_FULL_NAME
 
-    first_name, last_name = parsed
+    full_name = parsed
     try:
         await adb_run(
-            lambda conn: save_onboarding_name_db(
+            lambda conn: save_profile_full_name_db(
                 conn,
                 update.effective_user.id,
-                first_name,
-                last_name,
+                full_name,
             ),
             commit=True,
         )
@@ -213,7 +215,7 @@ async def handle_onboarding_name(update: Update, context: ContextTypes.DEFAULT_T
         return ConversationHandler.END
 
     await update.message.reply_text(
-        translate(language_code, "onboarding_age_prompt"),
+        translate(language_code, "onboarding_phone_prompt"),
         reply_markup=ReplyKeyboardRemove(),
     )
     return ASK_ONBOARD_AGE
@@ -236,16 +238,18 @@ async def handle_onboarding_age(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(translate("en", "db_error"))
         return ConversationHandler.END
     language_code = _progress_language(progress)
-    age = parse_age(update.message.text)
-    if age is None:
+    phone_number = parse_phone_number(update.message.text)
+    if phone_number is None:
         await update.message.reply_text(
-            translate(language_code, "onboarding_age_invalid")
+            translate(language_code, "onboarding_phone_invalid")
         )
         return ASK_ONBOARD_AGE
 
     try:
         await adb_run(
-            lambda conn: save_onboarding_age_db(conn, update.effective_user.id, age),
+            lambda conn: save_profile_phone_number_db(
+                conn, update.effective_user.id, phone_number
+            ),
             commit=True,
         )
     except sqlite3.Error:
@@ -257,7 +261,7 @@ async def handle_onboarding_age(update: Update, context: ContextTypes.DEFAULT_TY
         return ConversationHandler.END
 
     await update.message.reply_text(
-        translate(language_code, "onboarding_region_prompt"),
+        translate(language_code, "onboarding_study_prompt"),
         reply_markup=region_reply_keyboard(),
     )
     return ASK_ONBOARD_REGION
@@ -284,7 +288,7 @@ async def handle_onboarding_region(update: Update, context: ContextTypes.DEFAULT
     region = None if raw.strip() in MENU_LABELS else parse_region(raw)
     if region is None:
         await update.message.reply_text(
-            translate(language_code, "onboarding_region_invalid")
+            translate(language_code, "onboarding_study_invalid")
         )
         return ASK_ONBOARD_REGION
 
@@ -357,6 +361,28 @@ async def handle_start_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
     await serve_question(context, user_id, chat_id)
     return ConversationHandler.END
+
+
+async def handle_my_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    del context
+    if update.effective_user is None or update.message is None:
+        return ConversationHandler.END
+    try:
+        progress = await _ensure_user_progress(update)
+    except sqlite3.Error:
+        logger.exception("SQLite error while opening My info user_id=%s", update.effective_user.id)
+        await update.message.reply_text(translate("en", "db_error"))
+        return ConversationHandler.END
+    language_code = _progress_language(progress)
+    await adb_run(
+        lambda conn: set_onboarding_step_db(conn, update.effective_user.id, "full_name"),
+        commit=True,
+    )
+    await update.message.reply_text(
+        translate(language_code, "onboarding_name_prompt"),
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    return ASK_ONBOARD_FULL_NAME
 
 
 async def handle_about_us(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
