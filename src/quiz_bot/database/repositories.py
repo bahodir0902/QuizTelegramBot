@@ -334,6 +334,35 @@ def fetch_question_stats_db(conn: sqlite3.Connection, question_id: int) -> dict[
     }
 
 
+def fetch_user_attempts_db(
+    conn: sqlite3.Connection,
+    user_id: int,
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[sqlite3.Row]:
+    sql = """
+        SELECT
+            qa.id,
+            qa.question_id,
+            q.question_text,
+            q.options_json,
+            qa.selected_option_index,
+            q.correct_option_index,
+            qa.was_correct,
+            qa.timed_out,
+            qa.answered_at
+        FROM question_answers AS qa
+        INNER JOIN questions AS q ON q.id = qa.question_id
+        WHERE qa.user_id = ?
+        ORDER BY qa.answered_at DESC, qa.id DESC
+    """
+    params: list[object] = [user_id]
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+    return list(conn.execute(sql, params).fetchall())
+
 def update_config_field_db(conn: sqlite3.Connection, column: str, value: int) -> None:
     allowed = {
         "num_questions",

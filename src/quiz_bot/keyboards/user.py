@@ -29,6 +29,7 @@ def main_reply_keyboard(language_code: str) -> ReplyKeyboardMarkup:
         [
             [KeyboardButton(translate(language_code, "start_quiz_label"))],
             [KeyboardButton(translate(language_code, "about_us_label"))],
+            [KeyboardButton(translate(language_code, "my_attempts_label"))],
             [KeyboardButton(translate(language_code, "change_language_label"))],
         ],
         resize_keyboard=True,

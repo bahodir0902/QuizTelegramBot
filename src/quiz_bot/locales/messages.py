@@ -4,6 +4,17 @@ from __future__ import annotations
 
 MESSAGES: dict[str, dict[str, str]] = {
     "en": {
+        "my_attempts_label": "📊 My attempts",
+        "my_attempts_empty": "No attempts yet.",
+        "my_attempts_title": "My attempts (page {page}/{pages})",
+        "attempt_status_correct": "Correct",
+        "attempt_status_incorrect": "Incorrect",
+        "attempt_status_timed_out": "Timed out",
+        "attempt_selected_answer": "Selected answer",
+        "attempt_correct_answer": "Correct answer",
+        "attempt_not_answered": "Not answered",
+        "attempt_unknown_answer": "Unknown answer",
+        "attempt_deleted_question": "Deleted question",
         "language_prompt": "Choose your language.",
         "language_updated": "Language updated to English.",
         "change_language_label": "Change Language",
@@ -100,6 +111,17 @@ MESSAGES: dict[str, dict[str, str]] = {
         "cancelled": "Cancelled.",
     },
     "ru": {
+        "my_attempts_label": "📊 Мои попытки",
+        "my_attempts_empty": "Попыток пока нет.",
+        "my_attempts_title": "Мои попытки (страница {page}/{pages})",
+        "attempt_status_correct": "Правильно",
+        "attempt_status_incorrect": "Неправильно",
+        "attempt_status_timed_out": "Время вышло",
+        "attempt_selected_answer": "Выбранный ответ",
+        "attempt_correct_answer": "Правильный ответ",
+        "attempt_not_answered": "Нет ответа",
+        "attempt_unknown_answer": "Неизвестный ответ",
+        "attempt_deleted_question": "Удаленный вопрос",
         "language_prompt": "Выберите язык.",
         "language_updated": "Язык переключен на русский.",
         "change_language_label": "Сменить язык",
@@ -196,6 +218,17 @@ MESSAGES: dict[str, dict[str, str]] = {
         "cancelled": "Отменено.",
     },
     "uz": {
+        "my_attempts_label": "📊 Urinishlarim",
+        "my_attempts_empty": "Hali urinishlar yo'q.",
+        "my_attempts_title": "Urinishlarim ({page}/{pages}-sahifa)",
+        "attempt_status_correct": "To'g'ri",
+        "attempt_status_incorrect": "Noto'g'ri",
+        "attempt_status_timed_out": "Vaqt tugadi",
+        "attempt_selected_answer": "Tanlangan javob",
+        "attempt_correct_answer": "To'g'ri javob",
+        "attempt_not_answered": "Javob berilmagan",
+        "attempt_unknown_answer": "Noma'lum javob",
+        "attempt_deleted_question": "O'chirilgan savol",
         "language_prompt": "Tilni tanlang.",
         "language_updated": "Til o'zbekchaga o'zgartirildi.",
         "change_language_label": "Tilni o'zgartirish",
@@ -314,3 +347,4 @@ for values in MESSAGES.values():
 START_QUIZ_LABELS = tuple(values["start_quiz_label"] for values in MESSAGES.values())
 CHANGE_LANGUAGE_LABELS = tuple(values["change_language_label"] for values in MESSAGES.values())
 ABOUT_US_LABELS = tuple(values["about_us_label"] for values in MESSAGES.values())
+MY_ATTEMPTS_LABELS = tuple(values["my_attempts_label"] for values in MESSAGES.values())

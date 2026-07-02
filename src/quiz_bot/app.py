@@ -53,10 +53,16 @@ from quiz_bot.handlers.user_handlers import (
     handle_about_us,
     handle_onboarding_age,
     handle_onboarding_name,
+    handle_my_attempts,
     handle_onboarding_region,
     handle_start_quiz,
 )
-from quiz_bot.locales.messages import ABOUT_US_LABELS, CHANGE_LANGUAGE_LABELS, START_QUIZ_LABELS
+from quiz_bot.locales.messages import (
+    ABOUT_US_LABELS,
+    CHANGE_LANGUAGE_LABELS,
+    MY_ATTEMPTS_LABELS,
+    START_QUIZ_LABELS,
+)
 
 
 def _build_request(settings: AppSettings) -> HTTPXRequest:
@@ -78,6 +84,11 @@ def _change_language_regex() -> str:
 
 def _about_us_regex() -> str:
     escaped = [re.escape(label) for label in ABOUT_US_LABELS]
+    return "^(" + "|".join(escaped) + ")$"
+
+
+def _my_attempts_regex() -> str:
+    escaped = [re.escape(label) for label in MY_ATTEMPTS_LABELS]
     return "^(" + "|".join(escaped) + ")$"
 
 
@@ -163,6 +174,7 @@ def build_application(settings: AppSettings) -> Application:
             CommandHandler("start", cmd_start),
             MessageHandler(filters.Regex(_start_quiz_regex()), handle_start_quiz),
             MessageHandler(filters.Regex(_about_us_regex()), handle_about_us),
+            MessageHandler(filters.Regex(_my_attempts_regex()), handle_my_attempts),
         ],
         states={
             ASK_ONBOARD_FULL_NAME: [
