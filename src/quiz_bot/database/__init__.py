@@ -77,6 +77,7 @@ def _compat_settings() -> AppSettings:
                     write_timeout=30.0,
                     pool_timeout=10.0,
                     about_us_text=DEFAULT_ABOUT_US_TEXT,
+                    required_channel_ids=tuple(),
                 )
         return AppSettings(
             bot_token=base.bot_token,
@@ -91,6 +92,7 @@ def _compat_settings() -> AppSettings:
             write_timeout=base.write_timeout,
             pool_timeout=base.pool_timeout,
             about_us_text=base.about_us_text,
+            required_channel_ids=base.required_channel_ids,
         )
 
     if _settings_override is not None:
@@ -113,6 +115,7 @@ def _compat_settings() -> AppSettings:
             write_timeout=30.0,
             pool_timeout=10.0,
             about_us_text=DEFAULT_ABOUT_US_TEXT,
+            required_channel_ids=tuple(),
         )
 
 

@@ -55,6 +55,7 @@ from quiz_bot.handlers.user_handlers import (
     handle_onboarding_name,
     handle_onboarding_region,
     handle_start_quiz,
+    handle_subscription_check,
 )
 from quiz_bot.locales.messages import ABOUT_US_LABELS, CHANGE_LANGUAGE_LABELS, START_QUIZ_LABELS
 
@@ -195,6 +196,7 @@ def build_application(settings: AppSettings) -> Application:
     app.add_handler(CommandHandler("language", cmd_language))
     app.add_handler(CommandHandler("admin", cmd_admin))
     app.add_handler(CallbackQueryHandler(handle_language_callback, pattern="^lang:"))
+    app.add_handler(CallbackQueryHandler(handle_subscription_check, pattern="^subscription:check$"))
     app.add_handler(admin_conv)
     app.add_handler(
         MessageHandler(
