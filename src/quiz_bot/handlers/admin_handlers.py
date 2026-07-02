@@ -28,6 +28,7 @@ from quiz_bot.config.constants import (
     CB_ADMIN_EXPORT,
     CB_ADMIN_QUESTIONS,
     CB_ADMIN_SETTINGS,
+    CB_ADMIN_SEND_MESSAGE,
     CB_ADMIN_STATS,
     CB_QUESTION_DELETE_CONFIRM_PREFIX,
     CB_QUESTION_DELETE_OPTION_PREFIX,
@@ -222,6 +223,14 @@ async def admin_callback_router(update: Update, context: ContextTypes.DEFAULT_TY
 
     data = query.data
     dashboard = admin_dashboard_keyboard(language_code)
+
+    if data == CB_ADMIN_SEND_MESSAGE:
+        await safe_edit_message_text(
+            query,
+            translate(language_code, "admin_send_message_unavailable"),
+            reply_markup=dashboard,
+        )
+        return ConversationHandler.END
 
     if data == CB_ADMIN_STATS:
         try:
