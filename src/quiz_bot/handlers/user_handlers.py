@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 
@@ -14,6 +15,7 @@ from quiz_bot.config.settings import DEFAULT_ABOUT_US_TEXT
 from quiz_bot.database import (
     adb_run,
     complete_onboarding_db,
+    fetch_user_attempts_db,
     get_user_progress_db,
     save_onboarding_age_db,
     save_onboarding_name_db,
@@ -30,6 +32,7 @@ from quiz_bot.keyboards import (
 from quiz_bot.locales.messages import (
     ABOUT_US_LABELS,
     CHANGE_LANGUAGE_LABELS,
+    MY_ATTEMPTS_LABELS,
     START_QUIZ_LABELS,
 )
 from quiz_bot.services.localization_service import resolve_language, translate
@@ -45,7 +48,78 @@ from quiz_bot.services.quiz_service import serve_question
 
 logger = logging.getLogger(__name__)
 
-MENU_LABELS = frozenset((*START_QUIZ_LABELS, *CHANGE_LANGUAGE_LABELS, *ABOUT_US_LABELS))
+MENU_LABELS = frozenset(
+    (*START_QUIZ_LABELS, *CHANGE_LANGUAGE_LABELS, *ABOUT_US_LABELS, *MY_ATTEMPTS_LABELS)
+)
+
+
+ATTEMPTS_PAGE_SIZE = 5
+
+
+def _option_label(options: list[str], index: object, fallback: str) -> str:
+    try:
+        option_index = int(index)
+    except (TypeError, ValueError):
+        return fallback
+    if 0 <= option_index < len(options):
+        return f"{option_index}. {options[option_index]}"
+    return fallback
+
+
+def format_attempts_messages(
+    attempts,
+    language_code: str,
+    page_size: int = ATTEMPTS_PAGE_SIZE,
+) -> list[str]:
+    if not attempts:
+        return [translate(language_code, "my_attempts_empty")]
+
+    pages = (len(attempts) + page_size - 1) // page_size
+    messages: list[str] = []
+    for page_index in range(pages):
+        page_rows = attempts[page_index * page_size : (page_index + 1) * page_size]
+        parts = [
+            translate(
+                language_code,
+                "my_attempts_title",
+                page=page_index + 1,
+                pages=pages,
+            )
+        ]
+        for row in page_rows:
+            if int(row["timed_out"]):
+                status = translate(language_code, "attempt_status_timed_out")
+            elif int(row["was_correct"]):
+                status = translate(language_code, "attempt_status_correct")
+            else:
+                status = translate(language_code, "attempt_status_incorrect")
+
+            options = json.loads(str(row["options_json"])) if row["options_json"] else []
+            if not isinstance(options, list):
+                options = []
+            options = [str(option) for option in options]
+            unknown = translate(language_code, "attempt_unknown_answer")
+            selected = (
+                translate(language_code, "attempt_not_answered")
+                if int(row["timed_out"])
+                else _option_label(options, row["selected_option_index"], unknown)
+            )
+            correct = _option_label(options, row["correct_option_index"], unknown)
+            question = row["question_text"] or translate(
+                language_code, "attempt_deleted_question"
+            )
+            parts.append(
+                "\n".join(
+                    (
+                        f"{row['answered_at']} — {status}",
+                        str(question),
+                        f"{translate(language_code, 'attempt_selected_answer')}: {selected}",
+                        f"{translate(language_code, 'attempt_correct_answer')}: {correct}",
+                    )
+                )
+            )
+        messages.append("\n\n".join(parts))
+    return messages
 
 
 def _telegram_full_name(user) -> str:
@@ -391,4 +465,43 @@ async def handle_about_us(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         about_text,
         reply_markup=main_reply_keyboard(language_code),
     )
+    return ConversationHandler.END
+
+
+async def handle_my_attempts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    del context
+    if update.effective_user is None or update.message is None:
+        return ConversationHandler.END
+
+    user_id = update.effective_user.id
+    try:
+        progress = await _ensure_user_progress(update)
+    except sqlite3.Error:
+        logger.exception("SQLite error while opening attempts user_id=%s", user_id)
+        await update.message.reply_text(translate("en", "db_error"))
+        return ConversationHandler.END
+
+    language_code = _progress_language(progress)
+    if progress is None:
+        await update.message.reply_text(translate(language_code, "send_start_first"))
+        return ConversationHandler.END
+
+    if not is_onboarding_complete(progress):
+        await update.message.reply_text(
+            translate(language_code, "complete_registration_first")
+        )
+        return await _prompt_onboarding_step(update, progress)
+
+    try:
+        attempts = await adb_run(lambda conn: fetch_user_attempts_db(conn, user_id))
+    except sqlite3.Error:
+        logger.exception("SQLite error while loading attempts user_id=%s", user_id)
+        await update.message.reply_text(translate(language_code, "db_error"))
+        return ConversationHandler.END
+
+    for message in format_attempts_messages(attempts, language_code):
+        await update.message.reply_text(
+            message,
+            reply_markup=main_reply_keyboard(language_code),
+        )
     return ConversationHandler.END

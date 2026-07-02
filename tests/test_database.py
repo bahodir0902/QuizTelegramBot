@@ -22,6 +22,7 @@ from quiz_bot.database import (
     delete_question_option_db,
     fetch_question_db,
     fetch_question_stats_db,
+    fetch_user_attempts_db,
     get_user_progress_db,
     increment_score_and_advance_db,
     init_database,
@@ -266,6 +267,96 @@ class DatabaseLayerTests(unittest.TestCase):
         self.assertEqual(int(updated["score"]), 0)
         self.assertEqual(int(updated["current_pool_index"]), 1)
         self.assertIsNone(updated["current_poll_id"])
+
+    def test_fetch_user_attempts_empty_history(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 201, None, "No History")
+        conn.commit()
+
+        self.assertEqual(fetch_user_attempts_db(conn, 201), [])
+
+    def test_fetch_user_attempts_one_correct_attempt(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 202, None, "Correct User")
+        insert_question_db(conn, "Pick B", ["A", "B"], 1)
+        question_id = int(list_questions_db(conn)[0]["id"])
+        save_quiz_pool_db(conn, 202, [question_id])
+        update_poll_state_db(conn, 202, "poll-correct", 1, question_id, [0, 1])
+        score_poll_answer_db(conn, "poll-correct", 202, 1)
+        conn.commit()
+
+        attempts = fetch_user_attempts_db(conn, 202)
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(attempts[0]["question_text"], "Pick B")
+        self.assertEqual(attempts[0]["options_json"], '["A", "B"]')
+        self.assertEqual(int(attempts[0]["selected_option_index"]), 1)
+        self.assertEqual(int(attempts[0]["correct_option_index"]), 1)
+        self.assertEqual(int(attempts[0]["was_correct"]), 1)
+        self.assertEqual(int(attempts[0]["timed_out"]), 0)
+        self.assertIsNotNone(attempts[0]["answered_at"])
+
+    def test_fetch_user_attempts_one_incorrect_attempt(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 203, None, "Wrong User")
+        insert_question_db(conn, "Pick B", ["A", "B"], 1)
+        question_id = int(list_questions_db(conn)[0]["id"])
+        save_quiz_pool_db(conn, 203, [question_id])
+        update_poll_state_db(conn, 203, "poll-wrong", 1, question_id, [0, 1])
+        score_poll_answer_db(conn, "poll-wrong", 203, 0)
+        conn.commit()
+
+        attempts = fetch_user_attempts_db(conn, 203)
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(int(attempts[0]["selected_option_index"]), 0)
+        self.assertEqual(int(attempts[0]["correct_option_index"]), 1)
+        self.assertEqual(int(attempts[0]["was_correct"]), 0)
+
+    def test_fetch_user_attempts_timeout_attempt(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 204, None, "Timeout User")
+        insert_question_db(conn, "Timed?", ["Yes", "No"], 0)
+        question_id = int(list_questions_db(conn)[0]["id"])
+        save_quiz_pool_db(conn, 204, [question_id])
+        update_poll_state_db(conn, 204, "poll-timeout-attempt", 0, question_id, [0, 1])
+        advance_timeout_poll_db(conn, "poll-timeout-attempt", 204)
+        conn.commit()
+
+        attempts = fetch_user_attempts_db(conn, 204)
+        self.assertEqual(len(attempts), 1)
+        self.assertIsNone(attempts[0]["selected_option_index"])
+        self.assertEqual(int(attempts[0]["timed_out"]), 1)
+
+    def test_fetch_user_attempts_excludes_deleted_question_history(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 205, None, "Deleted User")
+        insert_question_db(conn, "Deleted?", ["Yes", "No"], 0)
+        question_id = int(list_questions_db(conn)[0]["id"])
+        save_quiz_pool_db(conn, 205, [question_id])
+        update_poll_state_db(conn, 205, "poll-deleted-attempt", 0, question_id, [0, 1])
+        score_poll_answer_db(conn, "poll-deleted-attempt", 205, 0)
+        delete_question_db(conn, question_id)
+        conn.commit()
+
+        self.assertEqual(fetch_user_attempts_db(conn, 205), [])
+
+    def test_fetch_user_attempts_pagination(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 206, None, "Paged User")
+        for index in range(3):
+            insert_question_db(conn, f"Question {index}", ["A", "B"], 0)
+            question_id = int(list_questions_db(conn)[-1]["id"])
+            conn.execute(
+                """
+                INSERT INTO question_answers (
+                    question_id, user_id, poll_id, selected_option_index, was_correct, timed_out, answered_at
+                ) VALUES (?, ?, ?, 0, 1, 0, ?)
+                """,
+                (question_id, 206, f"poll-page-{index}", f"2026-01-01T00:00:0{index}+00:00"),
+            )
+        conn.commit()
+
+        page = fetch_user_attempts_db(conn, 206, limit=2, offset=1)
+        self.assertEqual([row["question_text"] for row in page], ["Question 1", "Question 0"])
 
     def test_question_management_lifecycle(self) -> None:
         conn = self.open_conn()
