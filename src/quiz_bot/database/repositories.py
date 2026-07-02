@@ -358,6 +358,18 @@ def fetch_leaderboard_db(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     )
 
 
+def list_registered_users_db(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            """
+            SELECT user_id, username, full_name
+            FROM user_progress
+            ORDER BY user_id ASC
+            """
+        ).fetchall()
+    )
+
+
 def fetch_export_rows_db(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return list(
         conn.execute(
