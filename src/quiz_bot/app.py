@@ -56,7 +56,12 @@ from quiz_bot.handlers.user_handlers import (
     handle_onboarding_region,
     handle_start_quiz,
 )
-from quiz_bot.locales.messages import ABOUT_US_LABELS, CHANGE_LANGUAGE_LABELS, START_QUIZ_LABELS
+from quiz_bot.locales.messages import (
+    ABOUT_US_LABELS,
+    ADMIN_DASHBOARD_LABELS,
+    CHANGE_LANGUAGE_LABELS,
+    START_QUIZ_LABELS,
+)
 
 
 def _build_request(settings: AppSettings) -> HTTPXRequest:
@@ -78,6 +83,11 @@ def _change_language_regex() -> str:
 
 def _about_us_regex() -> str:
     escaped = [re.escape(label) for label in ABOUT_US_LABELS]
+    return "^(" + "|".join(escaped) + ")$"
+
+
+def _admin_dashboard_regex() -> str:
+    escaped = [re.escape(label) for label in ADMIN_DASHBOARD_LABELS]
     return "^(" + "|".join(escaped) + ")$"
 
 
@@ -193,7 +203,7 @@ def build_application(settings: AppSettings) -> Application:
 
     app.add_handler(user_conv)
     app.add_handler(CommandHandler("language", cmd_language))
-    app.add_handler(CommandHandler("admin", cmd_admin))
+    app.add_handler(MessageHandler(filters.Regex(_admin_dashboard_regex()), cmd_admin))
     app.add_handler(CallbackQueryHandler(handle_language_callback, pattern="^lang:"))
     app.add_handler(admin_conv)
     app.add_handler(

@@ -24,13 +24,19 @@ REGION_OPTIONS = (
 )
 
 
-def main_reply_keyboard(language_code: str) -> ReplyKeyboardMarkup:
+def main_reply_keyboard(language_code: str, *, is_admin: bool = False) -> ReplyKeyboardMarkup:
+    """Build the localized main menu for a regular user or administrator."""
+    rows = [
+        [KeyboardButton(translate(language_code, "start_quiz_label"))],
+        [KeyboardButton(translate(language_code, "my_attempts_label"))],
+        [KeyboardButton(translate(language_code, "my_profile_label"))],
+        [KeyboardButton(translate(language_code, "channels_label"))],
+        [KeyboardButton(translate(language_code, "about_us_label"))],
+    ]
+    if is_admin:
+        rows.append([KeyboardButton(translate(language_code, "admin_dashboard"))])
     return ReplyKeyboardMarkup(
-        [
-            [KeyboardButton(translate(language_code, "start_quiz_label"))],
-            [KeyboardButton(translate(language_code, "about_us_label"))],
-            [KeyboardButton(translate(language_code, "change_language_label"))],
-        ],
+        rows,
         resize_keyboard=True,
         one_time_keyboard=False,
     )
