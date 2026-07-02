@@ -37,6 +37,10 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
             last_name TEXT,
             age INTEGER,
             region TEXT,
+            profile_full_name TEXT,
+            profile_phone_number TEXT,
+            profile_study_or_address TEXT,
+            profile_updated_at TIMESTAMP,
             onboarding_completed INTEGER NOT NULL DEFAULT 0,
             onboarding_step TEXT,
             onboarded_at TIMESTAMP,
@@ -55,6 +59,24 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
 
         CREATE TABLE IF NOT EXISTS admins (
             user_id INTEGER PRIMARY KEY
+        );
+
+        CREATE TABLE IF NOT EXISTS channels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            url TEXT NOT NULL,
+            username TEXT,
+            require_join_before_test INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS bot_content (
+            content_key TEXT NOT NULL,
+            language_code TEXT NOT NULL,
+            content_text TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (content_key, language_code)
         );
 
         CREATE TABLE IF NOT EXISTS question_answers (
@@ -82,6 +104,14 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE user_progress ADD COLUMN age INTEGER")
     if "region" not in columns:
         conn.execute("ALTER TABLE user_progress ADD COLUMN region TEXT")
+    if "profile_full_name" not in columns:
+        conn.execute("ALTER TABLE user_progress ADD COLUMN profile_full_name TEXT")
+    if "profile_phone_number" not in columns:
+        conn.execute("ALTER TABLE user_progress ADD COLUMN profile_phone_number TEXT")
+    if "profile_study_or_address" not in columns:
+        conn.execute("ALTER TABLE user_progress ADD COLUMN profile_study_or_address TEXT")
+    if "profile_updated_at" not in columns:
+        conn.execute("ALTER TABLE user_progress ADD COLUMN profile_updated_at TIMESTAMP")
     onboarding_column_existed = "onboarding_completed" in columns
     if "onboarding_completed" not in columns:
         conn.execute(
@@ -109,7 +139,9 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
             """
             UPDATE user_progress
             SET onboarding_completed = 1,
-                onboarding_step = NULL
+                onboarding_step = NULL,
+                profile_full_name = COALESCE(profile_full_name, full_name),
+                profile_study_or_address = COALESCE(profile_study_or_address, region)
             """
         )
 
@@ -121,4 +153,18 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
                 id, num_questions, shuffle_questions, shuffle_options, question_timeout
             ) VALUES (1, 10, 1, 1, 0)
             """
+        )
+
+    default_about_texts = {
+        "uz": "Bu bot haqida:\n\nQuiz Bot bilimlaringizni qiziqarli testlar orqali sinash uchun yaratilgan.",
+        "ru": "О боте:\n\nQuiz Bot создан для увлекательных образовательных викторин.",
+        "en": "About this bot:\n\nQuiz Bot was created to deliver engaging educational quizzes.",
+    }
+    for language_code, content_text in default_about_texts.items():
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO bot_content (content_key, language_code, content_text)
+            VALUES ('about_bot', ?, ?)
+            """,
+            (language_code, content_text),
         )

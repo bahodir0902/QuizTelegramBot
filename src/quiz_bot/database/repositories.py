@@ -105,6 +105,28 @@ def set_user_language_db(conn: sqlite3.Connection, user_id: int, language_code: 
     )
 
 
+def load_profile_db(conn: sqlite3.Connection, user_id: int) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT user_id, profile_full_name, profile_phone_number,
+               profile_study_or_address, profile_updated_at, onboarding_completed
+        FROM user_progress
+        WHERE user_id = ?
+        """,
+        (user_id,),
+    ).fetchone()
+
+
+def _touch_profile_sql(field_assignment: str) -> str:
+    return f"""
+        UPDATE user_progress
+        SET {field_assignment},
+            profile_updated_at = ?,
+            onboarding_completed = 0
+        WHERE user_id = ?
+        """
+
+
 def set_onboarding_step_db(conn: sqlite3.Connection, user_id: int, step: str) -> None:
     conn.execute(
         """
@@ -117,25 +139,90 @@ def set_onboarding_step_db(conn: sqlite3.Connection, user_id: int, step: str) ->
     )
 
 
+def save_profile_full_name_db(conn: sqlite3.Connection, user_id: int, full_name: str) -> None:
+    normalized = " ".join(full_name.strip().split())
+    parts = normalized.split(maxsplit=1)
+    first_name = parts[0] if parts else None
+    last_name = parts[1] if len(parts) > 1 else None
+    conn.execute(
+        _touch_profile_sql(
+            "profile_full_name = ?, full_name = ?, first_name = ?, "
+            "last_name = ?, onboarding_step = 'phone_number'"
+        ),
+        (
+            normalized,
+            normalized,
+            first_name,
+            last_name,
+            _to_db_timestamp(_utc_now()),
+            user_id,
+        ),
+    )
+
+
+def save_profile_phone_number_db(
+    conn: sqlite3.Connection, user_id: int, phone_number: str
+) -> None:
+    normalized = " ".join(phone_number.strip().split())
+    conn.execute(
+        _touch_profile_sql(
+            "profile_phone_number = ?, onboarding_step = 'study_or_address'"
+        ),
+        (normalized, _to_db_timestamp(_utc_now()), user_id),
+    )
+
+
+def save_profile_study_or_address_db(
+    conn: sqlite3.Connection, user_id: int, study_or_address: str
+) -> None:
+    normalized = " ".join(study_or_address.strip().split())
+    conn.execute(
+        _touch_profile_sql(
+            "profile_study_or_address = ?, region = ?, onboarding_step = NULL"
+        ),
+        (normalized, normalized, _to_db_timestamp(_utc_now()), user_id),
+    )
+
+
+def mark_profile_completed_db(conn: sqlite3.Connection, user_id: int) -> sqlite3.Row:
+    conn.execute(
+        """
+        UPDATE user_progress
+        SET onboarding_completed = 1,
+            onboarding_step = NULL,
+            onboarded_at = COALESCE(onboarded_at, ?),
+            profile_updated_at = ?
+        WHERE user_id = ?
+        """,
+        (_to_db_timestamp(_utc_now()), _to_db_timestamp(_utc_now()), user_id),
+    )
+    row = get_user_progress_db(conn, user_id)
+    if row is None:
+        raise RuntimeError("user_progress row missing after profile completion")
+    return row
+
+
+def update_profile_from_my_info_db(
+    conn: sqlite3.Connection,
+    user_id: int,
+    *,
+    full_name: str,
+    phone_number: str,
+    study_or_address: str,
+) -> sqlite3.Row:
+    save_profile_full_name_db(conn, user_id, full_name)
+    save_profile_phone_number_db(conn, user_id, phone_number)
+    save_profile_study_or_address_db(conn, user_id, study_or_address)
+    return mark_profile_completed_db(conn, user_id)
+
+
 def save_onboarding_name_db(
     conn: sqlite3.Connection,
     user_id: int,
     first_name: str,
     last_name: str,
 ) -> None:
-    full_name = f"{first_name} {last_name}".strip()
-    conn.execute(
-        """
-        UPDATE user_progress
-        SET first_name = ?,
-            last_name = ?,
-            full_name = ?,
-            onboarding_step = 'age',
-            onboarding_completed = 0
-        WHERE user_id = ?
-        """,
-        (first_name, last_name, full_name, user_id),
-    )
+    save_profile_full_name_db(conn, user_id, f"{first_name} {last_name}".strip())
 
 
 def save_onboarding_age_db(conn: sqlite3.Connection, user_id: int, age: int) -> None:
@@ -143,7 +230,7 @@ def save_onboarding_age_db(conn: sqlite3.Connection, user_id: int, age: int) -> 
         """
         UPDATE user_progress
         SET age = ?,
-            onboarding_step = 'region',
+            onboarding_step = 'study_or_address',
             onboarding_completed = 0
         WHERE user_id = ?
         """,
@@ -152,21 +239,8 @@ def save_onboarding_age_db(conn: sqlite3.Connection, user_id: int, age: int) -> 
 
 
 def complete_onboarding_db(conn: sqlite3.Connection, user_id: int, region: str) -> sqlite3.Row:
-    conn.execute(
-        """
-        UPDATE user_progress
-        SET region = ?,
-            onboarding_completed = 1,
-            onboarding_step = NULL,
-            onboarded_at = ?
-        WHERE user_id = ?
-        """,
-        (region, _to_db_timestamp(_utc_now()), user_id),
-    )
-    row = get_user_progress_db(conn, user_id)
-    if row is None:
-        raise RuntimeError("user_progress row missing after onboarding completion")
-    return row
+    save_profile_study_or_address_db(conn, user_id, region)
+    return mark_profile_completed_db(conn, user_id)
 
 
 def get_user_by_poll_id_db(conn: sqlite3.Connection, poll_id: str) -> sqlite3.Row | None:
@@ -334,6 +408,35 @@ def fetch_question_stats_db(conn: sqlite3.Connection, question_id: int) -> dict[
     }
 
 
+def fetch_user_attempts_db(
+    conn: sqlite3.Connection,
+    user_id: int,
+    *,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[sqlite3.Row]:
+    sql = """
+        SELECT
+            qa.id,
+            qa.question_id,
+            q.question_text,
+            q.options_json,
+            qa.selected_option_index,
+            q.correct_option_index,
+            qa.was_correct,
+            qa.timed_out,
+            qa.answered_at
+        FROM question_answers AS qa
+        INNER JOIN questions AS q ON q.id = qa.question_id
+        WHERE qa.user_id = ?
+        ORDER BY qa.answered_at DESC, qa.id DESC
+    """
+    params: list[object] = [user_id]
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+    return list(conn.execute(sql, params).fetchall())
+
 def update_config_field_db(conn: sqlite3.Connection, column: str, value: int) -> None:
     allowed = {
         "num_questions",
@@ -346,6 +449,50 @@ def update_config_field_db(conn: sqlite3.Connection, column: str, value: int) ->
     conn.execute(f"UPDATE configs SET {column} = ? WHERE id = 1", (value,))
 
 
+
+def list_user_progress_rows_db(
+    conn: sqlite3.Connection,
+    *,
+    limit: int = 10,
+    offset: int = 0,
+) -> list[sqlite3.Row]:
+    if limit < 1:
+        raise ValueError("limit must be positive")
+    if offset < 0:
+        raise ValueError("offset cannot be negative")
+    return list(
+        conn.execute(
+            """
+            SELECT
+                user_id,
+                username,
+                full_name,
+                first_name,
+                last_name,
+                age,
+                region,
+                language_code,
+                onboarding_completed,
+                onboarding_step,
+                onboarded_at,
+                score,
+                session_status,
+                start_time,
+                finished_time,
+                last_duration_seconds
+            FROM user_progress
+            ORDER BY user_id ASC
+            LIMIT ? OFFSET ?
+            """,
+            (limit, offset),
+        ).fetchall()
+    )
+
+
+def count_user_progress_rows_db(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT COUNT(*) AS count FROM user_progress").fetchone()
+    return int(row["count"] if row is not None else 0)
+
 def fetch_leaderboard_db(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return list(
         conn.execute(
@@ -353,6 +500,18 @@ def fetch_leaderboard_db(conn: sqlite3.Connection) -> list[sqlite3.Row]:
             SELECT username, full_name, score
             FROM user_progress
             ORDER BY score DESC, full_name ASC
+            """
+        ).fetchall()
+    )
+
+
+def list_registered_users_db(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            """
+            SELECT user_id, username, full_name
+            FROM user_progress
+            ORDER BY user_id ASC
             """
         ).fetchall()
     )
@@ -698,8 +857,124 @@ def mark_session_status_db(conn: sqlite3.Connection, user_id: int, status: str) 
     )
 
 
+def get_about_bot_text_db(conn: sqlite3.Connection, language_code: str) -> str:
+    language = language_code if language_code in {"uz", "ru", "en"} else "en"
+    row = conn.execute(
+        """
+        SELECT content_text FROM bot_content
+        WHERE content_key = 'about_bot' AND language_code = ?
+        """,
+        (language,),
+    ).fetchone()
+    if row is not None:
+        return str(row["content_text"])
+    fallback = conn.execute(
+        """
+        SELECT content_text FROM bot_content
+        WHERE content_key = 'about_bot' AND language_code = 'en'
+        """
+    ).fetchone()
+    if fallback is None:
+        raise RuntimeError("about_bot content missing")
+    return str(fallback["content_text"])
+
+
+def update_about_bot_text_db(
+    conn: sqlite3.Connection,
+    language_code: str,
+    content_text: str,
+) -> None:
+    if language_code not in {"uz", "ru", "en"}:
+        raise ValueError("Unsupported language code")
+    text = content_text.strip()
+    if not text:
+        raise ValueError("About bot text cannot be empty")
+    conn.execute(
+        """
+        INSERT INTO bot_content (content_key, language_code, content_text, updated_at)
+        VALUES ('about_bot', ?, ?, ?)
+        ON CONFLICT(content_key, language_code) DO UPDATE SET
+            content_text = excluded.content_text,
+            updated_at = excluded.updated_at
+        """,
+        (language_code, text, _to_db_timestamp(_utc_now())),
+    )
+
+
 def seed_admin_db(conn: sqlite3.Connection, user_id: int) -> None:
     conn.execute(
         "INSERT OR IGNORE INTO admins (user_id) VALUES (?)",
         (user_id,),
     )
+
+
+def create_channel_db(
+    conn: sqlite3.Connection,
+    title: str,
+    url: str,
+    username: str | None,
+    require_join_before_test: bool = False,
+) -> sqlite3.Row:
+    now = _to_db_timestamp(_utc_now())
+    cursor = conn.execute(
+        """
+        INSERT INTO channels (title, url, username, require_join_before_test, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (title, url, username, 1 if require_join_before_test else 0, now, now),
+    )
+    row = fetch_channel_db(conn, int(cursor.lastrowid))
+    if row is None:
+        raise RuntimeError("channel row missing after insert")
+    return row
+
+
+def list_channels_db(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return list(conn.execute("SELECT * FROM channels ORDER BY id ASC").fetchall())
+
+
+def fetch_channel_db(conn: sqlite3.Connection, channel_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM channels WHERE id = ?", (channel_id,)).fetchone()
+
+
+def list_required_channels_db(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return list(
+        conn.execute(
+            "SELECT * FROM channels WHERE require_join_before_test = 1 ORDER BY id ASC"
+        ).fetchall()
+    )
+
+
+def update_channel_db(
+    conn: sqlite3.Connection,
+    channel_id: int,
+    title: str,
+    url: str,
+    username: str | None,
+) -> bool:
+    cursor = conn.execute(
+        """
+        UPDATE channels
+        SET title = ?, url = ?, username = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (title, url, username, _to_db_timestamp(_utc_now()), channel_id),
+    )
+    return cursor.rowcount == 1
+
+
+def delete_channel_db(conn: sqlite3.Connection, channel_id: int) -> bool:
+    cursor = conn.execute("DELETE FROM channels WHERE id = ?", (channel_id,))
+    return cursor.rowcount == 1
+
+
+def toggle_channel_required_db(conn: sqlite3.Connection, channel_id: int) -> sqlite3.Row | None:
+    row = fetch_channel_db(conn, channel_id)
+    if row is None:
+        return None
+    new_value = 0 if int(row["require_join_before_test"]) else 1
+    conn.execute(
+        "UPDATE channels SET require_join_before_test = ?, updated_at = ? WHERE id = ?",
+        (new_value, _to_db_timestamp(_utc_now()), channel_id),
+    )
+    return fetch_channel_db(conn, channel_id)

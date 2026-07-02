@@ -22,15 +22,23 @@ from quiz_bot.database import (
     delete_question_option_db,
     fetch_question_db,
     fetch_question_stats_db,
+    fetch_user_attempts_db,
     get_user_progress_db,
+    load_profile_db,
     increment_score_and_advance_db,
     init_database,
     insert_question_db,
     list_questions_db,
+    list_registered_users_db,
     read_config,
     replace_question_options_db,
     save_onboarding_age_db,
     save_onboarding_name_db,
+    save_profile_full_name_db,
+    save_profile_phone_number_db,
+    save_profile_study_or_address_db,
+    mark_profile_completed_db,
+    update_profile_from_my_info_db,
     save_quiz_pool_db,
     score_poll_answer_db,
     start_quiz_session_db,
@@ -126,6 +134,17 @@ class DatabaseLayerTests(unittest.TestCase):
         self.assertIsNone(row["finished_time"])
         self.assertIsNone(row["last_duration_seconds"])
 
+
+    def test_list_registered_users_orders_by_user_id(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 42, "alice", "Alice")
+        upsert_user_db(conn, 7, "bob", "Bob")
+        conn.commit()
+
+        rows = list_registered_users_db(conn)
+
+        self.assertEqual([int(row["user_id"]) for row in rows], [7, 42])
+
     def test_new_user_requires_onboarding_by_default(self) -> None:
         conn = self.open_conn()
         upsert_user_db(conn, 43, "newbie", "New User")
@@ -191,6 +210,48 @@ class DatabaseLayerTests(unittest.TestCase):
         assert row is not None
         self.assertEqual(int(row["onboarding_completed"]), 1)
         self.assertIsNone(row["onboarding_step"])
+
+
+    def test_profile_single_source_of_truth_is_saved_and_loaded(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 144, "student", "Telegram Name")
+        save_profile_full_name_db(conn, 144, "Alice Smith")
+        save_profile_phone_number_db(conn, 144, "+998 90 123 45 67")
+        save_profile_study_or_address_db(conn, 144, "Samarkand State University")
+        completed = mark_profile_completed_db(conn, 144)
+        profile = load_profile_db(conn, 144)
+
+        self.assertEqual(completed["profile_full_name"], "Alice Smith")
+        self.assertEqual(completed["profile_phone_number"], "+998 90 123 45 67")
+        self.assertEqual(completed["profile_study_or_address"], "Samarkand State University")
+        self.assertEqual(int(completed["onboarding_completed"]), 1)
+        self.assertIsNotNone(completed["profile_updated_at"])
+        self.assertIsNotNone(profile)
+        assert profile is not None
+        self.assertEqual(profile["profile_full_name"], "Alice Smith")
+
+    def test_update_profile_from_my_info_replaces_completed_profile(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 145, "student", "Telegram Name")
+        update_profile_from_my_info_db(
+            conn,
+            145,
+            full_name="Old Name",
+            phone_number="+998901111111",
+            study_or_address="Old Address",
+        )
+        updated = update_profile_from_my_info_db(
+            conn,
+            145,
+            full_name="New Name",
+            phone_number="+998902222222",
+            study_or_address="New Address",
+        )
+
+        self.assertEqual(updated["profile_full_name"], "New Name")
+        self.assertEqual(updated["profile_phone_number"], "+998902222222")
+        self.assertEqual(updated["profile_study_or_address"], "New Address")
+        self.assertEqual(int(updated["onboarding_completed"]), 1)
 
     def test_complete_quiz_session_stores_duration(self) -> None:
         conn = self.open_conn()
@@ -266,6 +327,96 @@ class DatabaseLayerTests(unittest.TestCase):
         self.assertEqual(int(updated["score"]), 0)
         self.assertEqual(int(updated["current_pool_index"]), 1)
         self.assertIsNone(updated["current_poll_id"])
+
+    def test_fetch_user_attempts_empty_history(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 201, None, "No History")
+        conn.commit()
+
+        self.assertEqual(fetch_user_attempts_db(conn, 201), [])
+
+    def test_fetch_user_attempts_one_correct_attempt(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 202, None, "Correct User")
+        insert_question_db(conn, "Pick B", ["A", "B"], 1)
+        question_id = int(list_questions_db(conn)[0]["id"])
+        save_quiz_pool_db(conn, 202, [question_id])
+        update_poll_state_db(conn, 202, "poll-correct", 1, question_id, [0, 1])
+        score_poll_answer_db(conn, "poll-correct", 202, 1)
+        conn.commit()
+
+        attempts = fetch_user_attempts_db(conn, 202)
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(attempts[0]["question_text"], "Pick B")
+        self.assertEqual(attempts[0]["options_json"], '["A", "B"]')
+        self.assertEqual(int(attempts[0]["selected_option_index"]), 1)
+        self.assertEqual(int(attempts[0]["correct_option_index"]), 1)
+        self.assertEqual(int(attempts[0]["was_correct"]), 1)
+        self.assertEqual(int(attempts[0]["timed_out"]), 0)
+        self.assertIsNotNone(attempts[0]["answered_at"])
+
+    def test_fetch_user_attempts_one_incorrect_attempt(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 203, None, "Wrong User")
+        insert_question_db(conn, "Pick B", ["A", "B"], 1)
+        question_id = int(list_questions_db(conn)[0]["id"])
+        save_quiz_pool_db(conn, 203, [question_id])
+        update_poll_state_db(conn, 203, "poll-wrong", 1, question_id, [0, 1])
+        score_poll_answer_db(conn, "poll-wrong", 203, 0)
+        conn.commit()
+
+        attempts = fetch_user_attempts_db(conn, 203)
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(int(attempts[0]["selected_option_index"]), 0)
+        self.assertEqual(int(attempts[0]["correct_option_index"]), 1)
+        self.assertEqual(int(attempts[0]["was_correct"]), 0)
+
+    def test_fetch_user_attempts_timeout_attempt(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 204, None, "Timeout User")
+        insert_question_db(conn, "Timed?", ["Yes", "No"], 0)
+        question_id = int(list_questions_db(conn)[0]["id"])
+        save_quiz_pool_db(conn, 204, [question_id])
+        update_poll_state_db(conn, 204, "poll-timeout-attempt", 0, question_id, [0, 1])
+        advance_timeout_poll_db(conn, "poll-timeout-attempt", 204)
+        conn.commit()
+
+        attempts = fetch_user_attempts_db(conn, 204)
+        self.assertEqual(len(attempts), 1)
+        self.assertIsNone(attempts[0]["selected_option_index"])
+        self.assertEqual(int(attempts[0]["timed_out"]), 1)
+
+    def test_fetch_user_attempts_excludes_deleted_question_history(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 205, None, "Deleted User")
+        insert_question_db(conn, "Deleted?", ["Yes", "No"], 0)
+        question_id = int(list_questions_db(conn)[0]["id"])
+        save_quiz_pool_db(conn, 205, [question_id])
+        update_poll_state_db(conn, 205, "poll-deleted-attempt", 0, question_id, [0, 1])
+        score_poll_answer_db(conn, "poll-deleted-attempt", 205, 0)
+        delete_question_db(conn, question_id)
+        conn.commit()
+
+        self.assertEqual(fetch_user_attempts_db(conn, 205), [])
+
+    def test_fetch_user_attempts_pagination(self) -> None:
+        conn = self.open_conn()
+        upsert_user_db(conn, 206, None, "Paged User")
+        for index in range(3):
+            insert_question_db(conn, f"Question {index}", ["A", "B"], 0)
+            question_id = int(list_questions_db(conn)[-1]["id"])
+            conn.execute(
+                """
+                INSERT INTO question_answers (
+                    question_id, user_id, poll_id, selected_option_index, was_correct, timed_out, answered_at
+                ) VALUES (?, ?, ?, 0, 1, 0, ?)
+                """,
+                (question_id, 206, f"poll-page-{index}", f"2026-01-01T00:00:0{index}+00:00"),
+            )
+        conn.commit()
+
+        page = fetch_user_attempts_db(conn, 206, limit=2, offset=1)
+        self.assertEqual([row["question_text"] for row in page], ["Question 1", "Question 0"])
 
     def test_question_management_lifecycle(self) -> None:
         conn = self.open_conn()
@@ -398,6 +549,31 @@ class DatabaseLayerTests(unittest.TestCase):
         self.assertEqual(int(updated["current_pool_index"]), 1)
         rows = conn.execute("SELECT * FROM question_answers").fetchall()
         self.assertEqual(rows, [])
+
+    def test_about_bot_defaults_are_seeded_per_language(self) -> None:
+        from quiz_bot.database import get_about_bot_text_db
+
+        conn = self.open_conn()
+        self.assertIn("Quiz Bot", get_about_bot_text_db(conn, "en"))
+        self.assertIn("О боте", get_about_bot_text_db(conn, "ru"))
+        self.assertIn("Bu bot", get_about_bot_text_db(conn, "uz"))
+
+    def test_about_bot_can_be_updated_per_language(self) -> None:
+        from quiz_bot.database import get_about_bot_text_db, update_about_bot_text_db
+
+        conn = self.open_conn()
+        update_about_bot_text_db(conn, "ru", "Новый текст")
+        conn.commit()
+
+        self.assertEqual(get_about_bot_text_db(conn, "ru"), "Новый текст")
+        self.assertIn("Quiz Bot", get_about_bot_text_db(conn, "en"))
+
+    def test_about_bot_rejects_empty_text(self) -> None:
+        from quiz_bot.database import update_about_bot_text_db
+
+        conn = self.open_conn()
+        with self.assertRaises(ValueError):
+            update_about_bot_text_db(conn, "en", "   ")
 
 
 if __name__ == "__main__":
