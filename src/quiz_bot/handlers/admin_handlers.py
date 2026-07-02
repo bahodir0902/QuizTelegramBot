@@ -17,6 +17,8 @@ from telegram.ext import ContextTypes, ConversationHandler
 from quiz_bot.config.constants import (
     ASK_EDIT_CORRECT_INDEX,
     ASK_EDIT_OPTIONS,
+    ASK_CHANNEL_URL,
+    ASK_EDIT_CHANNEL_URL,
     ASK_EDIT_QUESTION_TEXT,
     ASK_CORRECT_INDEX,
     ASK_NUM_QUESTIONS,
@@ -25,6 +27,7 @@ from quiz_bot.config.constants import (
     ASK_TIMER_SECONDS,
     CB_ADMIN_ADD,
     CB_ADMIN_BACK,
+    CB_ADMIN_CHANNELS,
     CB_ADMIN_EXPORT,
     CB_ADMIN_QUESTIONS,
     CB_ADMIN_SETTINGS,
@@ -39,28 +42,40 @@ from quiz_bot.config.constants import (
     CB_QUESTION_VIEW_PREFIX,
     CB_SET_LIMIT,
     CB_SET_TIMER,
+    CB_CHANNEL_ADD,
+    CB_CHANNEL_DELETE_CONFIRM_PREFIX,
+    CB_CHANNEL_DELETE_PREFIX,
+    CB_CHANNEL_EDIT_PREFIX,
+    CB_CHANNEL_TOGGLE_REQUIRE_PREFIX,
     CB_TOGGLE_OPT_SHUFFLE,
     CB_TOGGLE_Q_SHUFFLE,
 )
 from quiz_bot.database import (
     adb_run,
+    create_channel_db,
+    delete_channel_db,
     delete_question_db,
     delete_question_option_db,
     fetch_export_rows_db,
     fetch_leaderboard_db,
     fetch_question_db,
     fetch_question_stats_db,
+    list_channels_db,
     insert_question_db,
     is_admin_user,
     list_questions_db,
     read_config,
     replace_question_options_db,
     toggle_config_field_db,
+    toggle_channel_required_db,
     update_config_field_db,
+    update_channel_db,
     update_question_correct_index_db,
     update_question_text_db,
 )
 from quiz_bot.keyboards import (
+    admin_channel_delete_keyboard,
+    admin_channels_keyboard,
     admin_dashboard_keyboard,
     admin_question_delete_keyboard,
     admin_question_detail_keyboard,
@@ -68,6 +83,7 @@ from quiz_bot.keyboards import (
     admin_questions_keyboard,
     admin_settings_keyboard,
 )
+from quiz_bot.services.channel_service import parse_channel_reference
 from quiz_bot.services.localization_service import language_for_user, translate
 from quiz_bot.utils.json import parse_options_json
 from quiz_bot.utils.names import user_display_name
@@ -222,6 +238,42 @@ async def admin_callback_router(update: Update, context: ContextTypes.DEFAULT_TY
 
     data = query.data
     dashboard = admin_dashboard_keyboard(language_code)
+
+    if data == CB_ADMIN_CHANNELS:
+        rows = await adb_run(list_channels_db)
+        text = translate(language_code, "admin_channels_title") if rows else translate(language_code, "admin_channels_empty")
+        await safe_edit_message_text(query, text, reply_markup=admin_channels_keyboard(rows, language_code))
+        return ConversationHandler.END
+
+    if data == CB_CHANNEL_ADD:
+        await safe_edit_message_text(query, translate(language_code, "admin_channel_prompt"), parse_mode=ParseMode.MARKDOWN)
+        return ASK_CHANNEL_URL
+
+    channel_id = _callback_id(data, CB_CHANNEL_TOGGLE_REQUIRE_PREFIX)
+    if channel_id is not None:
+        await adb_run(lambda conn: toggle_channel_required_db(conn, channel_id), commit=True)
+        rows = await adb_run(list_channels_db)
+        await safe_edit_message_text(query, translate(language_code, "admin_channels_title"), reply_markup=admin_channels_keyboard(rows, language_code))
+        return ConversationHandler.END
+
+    channel_id = _callback_id(data, CB_CHANNEL_EDIT_PREFIX)
+    if channel_id is not None:
+        context.user_data["edit_channel_id"] = channel_id
+        await safe_edit_message_text(query, translate(language_code, "admin_channel_prompt"), parse_mode=ParseMode.MARKDOWN)
+        return ASK_EDIT_CHANNEL_URL
+
+    channel_id = _callback_id(data, CB_CHANNEL_DELETE_CONFIRM_PREFIX)
+    if channel_id is not None:
+        await safe_edit_message_text(query, translate(language_code, "admin_channel_delete_confirm", id=channel_id), reply_markup=admin_channel_delete_keyboard(channel_id, language_code))
+        return ConversationHandler.END
+
+    channel_id = _callback_id(data, CB_CHANNEL_DELETE_PREFIX)
+    if channel_id is not None:
+        ok = await adb_run(lambda conn: delete_channel_db(conn, channel_id), commit=True)
+        rows = await adb_run(list_channels_db)
+        text = translate(language_code, "admin_channel_deleted" if ok else "admin_channel_missing")
+        await safe_edit_message_text(query, text, reply_markup=admin_channels_keyboard(rows, language_code))
+        return ConversationHandler.END
 
     if data == CB_ADMIN_STATS:
         try:
@@ -901,4 +953,34 @@ async def admin_set_timer(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         translate(language_code, message_key, value=value),
         reply_markup=admin_settings_keyboard(config, language_code),
     )
+    return ConversationHandler.END
+
+
+async def admin_add_channel_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    del context
+    if update.effective_user is None or update.message is None:
+        return ConversationHandler.END
+    language_code = await language_for_user(update.effective_user.id)
+    parsed = parse_channel_reference(update.message.text or "")
+    if parsed is None:
+        await update.message.reply_text(translate(language_code, "admin_channel_invalid"))
+        return ASK_CHANNEL_URL
+    await adb_run(lambda conn: create_channel_db(conn, parsed.title, parsed.url, parsed.username), commit=True)
+    rows = await adb_run(list_channels_db)
+    await update.message.reply_text(translate(language_code, "admin_channel_added"), reply_markup=admin_channels_keyboard(rows, language_code))
+    return ConversationHandler.END
+
+
+async def admin_edit_channel_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if update.effective_user is None or update.message is None:
+        return ConversationHandler.END
+    language_code = await language_for_user(update.effective_user.id)
+    channel_id = int(context.user_data.get("edit_channel_id", 0))
+    parsed = parse_channel_reference(update.message.text or "")
+    if channel_id <= 0 or parsed is None:
+        await update.message.reply_text(translate(language_code, "admin_channel_invalid"))
+        return ASK_EDIT_CHANNEL_URL
+    ok = await adb_run(lambda conn: update_channel_db(conn, channel_id, parsed.title, parsed.url, parsed.username), commit=True)
+    rows = await adb_run(list_channels_db)
+    await update.message.reply_text(translate(language_code, "admin_channel_updated" if ok else "admin_channel_missing"), reply_markup=admin_channels_keyboard(rows, language_code))
     return ConversationHandler.END

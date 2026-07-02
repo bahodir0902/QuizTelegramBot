@@ -57,6 +57,16 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
             user_id INTEGER PRIMARY KEY
         );
 
+        CREATE TABLE IF NOT EXISTS channels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            url TEXT NOT NULL,
+            username TEXT,
+            require_join_before_test INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE TABLE IF NOT EXISTS question_answers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             question_id INTEGER NOT NULL,

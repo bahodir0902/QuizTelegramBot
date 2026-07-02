@@ -306,6 +306,28 @@ COMMON_MESSAGES = {
     "quiz_complete_timed": (
         "Quiz complete!\n\nYour score: *{score}* / {total}\nTime taken: {duration}"
     ),
+    "channels_label": "Channels",
+    "channels_title": "Our channels:",
+    "channels_empty": "No channels have been added yet.",
+    "join_required_channels": "Please join the required channels before starting the quiz.",
+    "check_subscription_label": "Check subscription",
+    "subscription_verified": "Subscription verified. Starting your quiz now.",
+    "subscription_still_required": "Subscription is still required for all listed channels.",
+    "subscription_check_unavailable": "I cannot verify one or more channels. Please contact an administrator.",
+    "admin_manage_channels": "Manage Channels",
+    "admin_add_channel": "Add Channel",
+    "admin_edit_channel": "Edit",
+    "admin_delete_channel": "Delete",
+    "admin_channels_empty": "No channels have been added yet.",
+    "admin_channels_title": "Manage channels. Tap a channel to toggle: Require users to join before using bot.",
+    "admin_channel_prompt": "Send a Telegram channel @username or https://t.me/ link.\n\n/cancel to abort.",
+    "admin_channel_invalid": "Send a valid public Telegram channel username or t.me URL.",
+    "admin_channel_added": "Channel added.",
+    "admin_channel_updated": "Channel updated.",
+    "admin_channel_deleted": "Channel deleted.",
+    "admin_channel_missing": "Channel was not found.",
+    "admin_channel_delete_confirm": "Delete channel #{id}?",
+    "admin_channel_failed": "Failed to update channel.",
 }
 
 for values in MESSAGES.values():
@@ -314,3 +336,4 @@ for values in MESSAGES.values():
 START_QUIZ_LABELS = tuple(values["start_quiz_label"] for values in MESSAGES.values())
 CHANGE_LANGUAGE_LABELS = tuple(values["change_language_label"] for values in MESSAGES.values())
 ABOUT_US_LABELS = tuple(values["about_us_label"] for values in MESSAGES.values())
+CHANNELS_LABELS = tuple(values["channels_label"] for values in MESSAGES.values())
