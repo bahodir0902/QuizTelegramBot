@@ -399,6 +399,31 @@ class DatabaseLayerTests(unittest.TestCase):
         rows = conn.execute("SELECT * FROM question_answers").fetchall()
         self.assertEqual(rows, [])
 
+    def test_about_bot_defaults_are_seeded_per_language(self) -> None:
+        from quiz_bot.database import get_about_bot_text_db
+
+        conn = self.open_conn()
+        self.assertIn("Quiz Bot", get_about_bot_text_db(conn, "en"))
+        self.assertIn("О боте", get_about_bot_text_db(conn, "ru"))
+        self.assertIn("Bu bot", get_about_bot_text_db(conn, "uz"))
+
+    def test_about_bot_can_be_updated_per_language(self) -> None:
+        from quiz_bot.database import get_about_bot_text_db, update_about_bot_text_db
+
+        conn = self.open_conn()
+        update_about_bot_text_db(conn, "ru", "Новый текст")
+        conn.commit()
+
+        self.assertEqual(get_about_bot_text_db(conn, "ru"), "Новый текст")
+        self.assertIn("Quiz Bot", get_about_bot_text_db(conn, "en"))
+
+    def test_about_bot_rejects_empty_text(self) -> None:
+        from quiz_bot.database import update_about_bot_text_db
+
+        conn = self.open_conn()
+        with self.assertRaises(ValueError):
+            update_about_bot_text_db(conn, "en", "   ")
+
 
 if __name__ == "__main__":
     unittest.main()

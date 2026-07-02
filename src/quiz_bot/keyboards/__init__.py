@@ -1,6 +1,7 @@
 """Keyboard builders."""
 
 from .admin import (
+    admin_about_language_keyboard,
     admin_dashboard_keyboard,
     admin_question_delete_keyboard,
     admin_question_detail_keyboard,
@@ -12,6 +13,7 @@ from .language import language_keyboard
 from .user import main_reply_keyboard, region_reply_keyboard
 
 __all__ = [
+    "admin_about_language_keyboard",
     "admin_dashboard_keyboard",
     "admin_question_delete_keyboard",
     "admin_question_detail_keyboard",

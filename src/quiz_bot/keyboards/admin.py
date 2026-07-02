@@ -6,6 +6,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from quiz_bot.config.constants import (
     CB_ADMIN_ADD,
+    CB_ADMIN_ABOUT,
     CB_ADMIN_BACK,
     CB_ADMIN_EXPORT,
     CB_ADMIN_QUESTIONS,
@@ -47,6 +48,12 @@ def admin_dashboard_keyboard(language_code: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     translate(language_code, "settings"),
                     callback_data=CB_ADMIN_SETTINGS,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    translate(language_code, "admin_edit_about_bot"),
+                    callback_data=CB_ADMIN_ABOUT,
                 )
             ],
             [
@@ -234,5 +241,16 @@ def admin_settings_keyboard(config: BotConfig, language_code: str) -> InlineKeyb
                     callback_data=CB_ADMIN_BACK,
                 )
             ],
+        ]
+    )
+
+
+def admin_about_language_keyboard(language_code: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("O'zbekcha", callback_data="about:edit:uz")],
+            [InlineKeyboardButton("Русский", callback_data="about:edit:ru")],
+            [InlineKeyboardButton("English", callback_data="about:edit:en")],
+            [InlineKeyboardButton(translate(language_code, "admin_back"), callback_data=CB_ADMIN_BACK)],
         ]
     )

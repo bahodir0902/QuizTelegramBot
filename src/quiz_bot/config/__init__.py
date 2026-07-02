@@ -3,6 +3,7 @@
 from .constants import (
     ASK_CORRECT_INDEX,
     ASK_EDIT_CORRECT_INDEX,
+    ASK_EDIT_ABOUT_TEXT,
     ASK_EDIT_OPTIONS,
     ASK_EDIT_QUESTION_TEXT,
     ASK_NUM_QUESTIONS,
@@ -20,6 +21,7 @@ from .settings import AppSettings, load_settings
 __all__ = [
     "ASK_CORRECT_INDEX",
     "ASK_EDIT_CORRECT_INDEX",
+    "ASK_EDIT_ABOUT_TEXT",
     "ASK_EDIT_OPTIONS",
     "ASK_EDIT_QUESTION_TEXT",
     "ASK_NUM_QUESTIONS",

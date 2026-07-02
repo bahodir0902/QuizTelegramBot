@@ -16,6 +16,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from quiz_bot.config.constants import (
     ASK_EDIT_CORRECT_INDEX,
+    ASK_EDIT_ABOUT_TEXT,
     ASK_EDIT_OPTIONS,
     ASK_EDIT_QUESTION_TEXT,
     ASK_CORRECT_INDEX,
@@ -24,6 +25,7 @@ from quiz_bot.config.constants import (
     ASK_QUESTION_TEXT,
     ASK_TIMER_SECONDS,
     CB_ADMIN_ADD,
+    CB_ADMIN_ABOUT,
     CB_ADMIN_BACK,
     CB_ADMIN_EXPORT,
     CB_ADMIN_QUESTIONS,
@@ -39,6 +41,7 @@ from quiz_bot.config.constants import (
     CB_QUESTION_VIEW_PREFIX,
     CB_SET_LIMIT,
     CB_SET_TIMER,
+    CB_EDIT_ABOUT_PREFIX,
     CB_TOGGLE_OPT_SHUFFLE,
     CB_TOGGLE_Q_SHUFFLE,
 )
@@ -52,6 +55,7 @@ from quiz_bot.database import (
     fetch_question_stats_db,
     insert_question_db,
     is_admin_user,
+    update_about_bot_text_db,
     list_questions_db,
     read_config,
     replace_question_options_db,
@@ -61,6 +65,7 @@ from quiz_bot.database import (
     update_question_text_db,
 )
 from quiz_bot.keyboards import (
+    admin_about_language_keyboard,
     admin_dashboard_keyboard,
     admin_question_delete_keyboard,
     admin_question_detail_keyboard,
@@ -361,6 +366,27 @@ async def admin_callback_router(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup=admin_settings_keyboard(config, language_code),
         )
         return ConversationHandler.END
+
+    if data == CB_ADMIN_ABOUT:
+        await safe_edit_message_text(
+            query,
+            translate(language_code, "admin_about_language_prompt"),
+            reply_markup=admin_about_language_keyboard(language_code),
+        )
+        return ConversationHandler.END
+
+    if data.startswith(CB_EDIT_ABOUT_PREFIX):
+        about_language = data.removeprefix(CB_EDIT_ABOUT_PREFIX)
+        if about_language not in {"uz", "ru", "en"}:
+            await safe_edit_message_text(query, translate(language_code, "admin_settings_failed"))
+            return ConversationHandler.END
+        context.user_data["edit_about_language"] = about_language
+        await safe_edit_message_text(
+            query,
+            translate(language_code, "admin_edit_about_prompt", language=about_language),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return ASK_EDIT_ABOUT_TEXT
 
     if data == CB_ADMIN_BACK:
         await safe_edit_message_text(
@@ -900,5 +926,45 @@ async def admin_set_timer(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text(
         translate(language_code, message_key, value=value),
         reply_markup=admin_settings_keyboard(config, language_code),
+    )
+    return ConversationHandler.END
+
+
+async def admin_edit_about_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    language_code = await _admin_language(update)
+    if update.message is None or update.effective_user is None:
+        return ConversationHandler.END
+    if not await adb_run(lambda conn: is_admin_user(conn, update.effective_user.id)):
+        await update.message.reply_text(translate(language_code, "permission_denied"))
+        return ConversationHandler.END
+
+    about_language = context.user_data.get("edit_about_language")
+    if about_language not in {"uz", "ru", "en"}:
+        await update.message.reply_text(
+            translate(language_code, "admin_settings_failed"),
+            reply_markup=admin_dashboard_keyboard(language_code),
+        )
+        return ConversationHandler.END
+
+    text = (update.message.text or "").strip()
+    if not text:
+        await update.message.reply_text(translate(language_code, "admin_about_empty"))
+        return ASK_EDIT_ABOUT_TEXT
+
+    try:
+        await adb_run(
+            lambda conn: update_about_bot_text_db(conn, str(about_language), text),
+            commit=True,
+            immediate=True,
+        )
+    except (sqlite3.Error, ValueError):
+        logger.exception("Failed to update about bot text language=%s", about_language)
+        await update.message.reply_text(translate(language_code, "admin_about_update_failed"))
+        return ConversationHandler.END
+
+    context.user_data.pop("edit_about_language", None)
+    await update.message.reply_text(
+        translate(language_code, "admin_about_updated", language=about_language),
+        reply_markup=admin_dashboard_keyboard(language_code),
     )
     return ConversationHandler.END

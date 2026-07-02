@@ -698,6 +698,50 @@ def mark_session_status_db(conn: sqlite3.Connection, user_id: int, status: str) 
     )
 
 
+def get_about_bot_text_db(conn: sqlite3.Connection, language_code: str) -> str:
+    language = language_code if language_code in {"uz", "ru", "en"} else "en"
+    row = conn.execute(
+        """
+        SELECT content_text FROM bot_content
+        WHERE content_key = 'about_bot' AND language_code = ?
+        """,
+        (language,),
+    ).fetchone()
+    if row is not None:
+        return str(row["content_text"])
+    fallback = conn.execute(
+        """
+        SELECT content_text FROM bot_content
+        WHERE content_key = 'about_bot' AND language_code = 'en'
+        """
+    ).fetchone()
+    if fallback is None:
+        raise RuntimeError("about_bot content missing")
+    return str(fallback["content_text"])
+
+
+def update_about_bot_text_db(
+    conn: sqlite3.Connection,
+    language_code: str,
+    content_text: str,
+) -> None:
+    if language_code not in {"uz", "ru", "en"}:
+        raise ValueError("Unsupported language code")
+    text = content_text.strip()
+    if not text:
+        raise ValueError("About bot text cannot be empty")
+    conn.execute(
+        """
+        INSERT INTO bot_content (content_key, language_code, content_text, updated_at)
+        VALUES ('about_bot', ?, ?, ?)
+        ON CONFLICT(content_key, language_code) DO UPDATE SET
+            content_text = excluded.content_text,
+            updated_at = excluded.updated_at
+        """,
+        (language_code, text, _to_db_timestamp(_utc_now())),
+    )
+
+
 def seed_admin_db(conn: sqlite3.Connection, user_id: int) -> None:
     conn.execute(
         "INSERT OR IGNORE INTO admins (user_id) VALUES (?)",

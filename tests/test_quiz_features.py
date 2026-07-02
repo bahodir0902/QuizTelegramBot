@@ -181,6 +181,135 @@ class QuizDeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(row["finished_time"])
         self.assertIsNotNone(row["last_duration_seconds"])
 
+class FakeMessage:
+    def __init__(self, text: str = "") -> None:
+        self.text = text
+        self.replies: list[dict] = []
+
+    async def reply_text(self, text, **kwargs):
+        self.replies.append({"text": text, **kwargs})
+        return SimpleNamespace()
+
+
+class AboutBotHandlerTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self._settings = AppSettings(
+            bot_token="TEST_TOKEN",
+            initial_admin_ids=tuple(),
+            data_dir=Path(self._tmp.name),
+            db_path=Path(self._tmp.name) / "test.db",
+            log_level="INFO",
+            default_language="en",
+            db_busy_timeout_ms=5000,
+            connect_timeout=10.0,
+            read_timeout=30.0,
+            write_timeout=30.0,
+            pool_timeout=10.0,
+            about_us_text=DEFAULT_ABOUT_US_TEXT,
+        )
+        configure_database_settings(self._settings)
+        init_database(self._settings)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def _update(self, user_id: int, text: str = ""):
+        return SimpleNamespace(
+            effective_user=SimpleNamespace(id=user_id, username="tester", full_name="Test User"),
+            effective_chat=SimpleNamespace(id=user_id),
+            message=FakeMessage(text),
+        )
+
+    def _complete_user(self, user_id: int, language: str) -> None:
+        conn = connect(self._settings)
+        try:
+            upsert_user_db(conn, user_id, "tester", "Test User", language)
+            conn.execute(
+                "UPDATE user_progress SET onboarding_completed = 1 WHERE user_id = ?",
+                (user_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    async def test_about_bot_handler_uses_user_language_text(self) -> None:
+        from quiz_bot.database import update_about_bot_text_db
+        from quiz_bot.handlers.user_handlers import handle_about_us
+
+        self._complete_user(201, "uz")
+        conn = connect(self._settings)
+        try:
+            update_about_bot_text_db(conn, "uz", "Maxsus uz matn")
+            conn.commit()
+        finally:
+            conn.close()
+
+        update = self._update(201, "ℹ️ Bot haqida")
+        await handle_about_us(update, SimpleNamespace())
+
+        self.assertEqual(update.message.replies[0]["text"], "Maxsus uz matn")
+
+    async def test_admin_can_edit_about_bot_text(self) -> None:
+        from quiz_bot.database import get_about_bot_text_db, seed_admin_db
+        from quiz_bot.handlers.admin_handlers import admin_edit_about_text
+
+        self._complete_user(202, "en")
+        conn = connect(self._settings)
+        try:
+            seed_admin_db(conn, 202)
+            conn.commit()
+        finally:
+            conn.close()
+
+        context = SimpleNamespace(user_data={"edit_about_language": "en"})
+        update = self._update(202, "Updated about text")
+        result = await admin_edit_about_text(update, context)
+
+        self.assertEqual(result, -1)
+        conn = connect(self._settings)
+        try:
+            self.assertEqual(get_about_bot_text_db(conn, "en"), "Updated about text")
+        finally:
+            conn.close()
+        self.assertIn("updated", update.message.replies[0]["text"].lower())
+
+    async def test_non_admin_cannot_edit_about_bot_text(self) -> None:
+        from quiz_bot.database import get_about_bot_text_db
+        from quiz_bot.handlers.admin_handlers import admin_edit_about_text
+
+        self._complete_user(203, "en")
+        context = SimpleNamespace(user_data={"edit_about_language": "en"})
+        update = self._update(203, "Should not save")
+        await admin_edit_about_text(update, context)
+
+        conn = connect(self._settings)
+        try:
+            self.assertNotEqual(get_about_bot_text_db(conn, "en"), "Should not save")
+        finally:
+            conn.close()
+        self.assertIn("Permission denied", update.message.replies[0]["text"])
+
+    async def test_admin_edit_about_bot_rejects_empty_text(self) -> None:
+        from quiz_bot.config import ASK_EDIT_ABOUT_TEXT
+        from quiz_bot.database import seed_admin_db
+        from quiz_bot.handlers.admin_handlers import admin_edit_about_text
+
+        self._complete_user(204, "en")
+        conn = connect(self._settings)
+        try:
+            seed_admin_db(conn, 204)
+            conn.commit()
+        finally:
+            conn.close()
+
+        context = SimpleNamespace(user_data={"edit_about_language": "en"})
+        update = self._update(204, "   ")
+        result = await admin_edit_about_text(update, context)
+
+        self.assertEqual(result, ASK_EDIT_ABOUT_TEXT)
+        self.assertIn("cannot be empty", update.message.replies[0]["text"])
+
 
 if __name__ == "__main__":
     unittest.main()

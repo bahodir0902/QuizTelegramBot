@@ -4,6 +4,13 @@ from __future__ import annotations
 
 MESSAGES: dict[str, dict[str, str]] = {
     "en": {
+        "about_us_label": 'ℹ️ About bot',
+        "admin_edit_about_bot": 'Edit About bot',
+        "admin_about_language_prompt": 'Choose About bot language to edit.',
+        "admin_edit_about_prompt": 'Send the new *About bot* text for {language}.\n\n/cancel to abort.',
+        "admin_about_empty": 'About bot text cannot be empty. Try again.',
+        "admin_about_updated": 'About bot text updated for {language}.',
+        "admin_about_update_failed": 'Failed to update About bot text.',
         "language_prompt": "Choose your language.",
         "language_updated": "Language updated to English.",
         "change_language_label": "Change Language",
@@ -100,6 +107,13 @@ MESSAGES: dict[str, dict[str, str]] = {
         "cancelled": "Cancelled.",
     },
     "ru": {
+        "about_us_label": 'ℹ️ О боте',
+        "admin_edit_about_bot": 'Редактировать О боте',
+        "admin_about_language_prompt": 'Выберите язык текста «О боте».',
+        "admin_edit_about_prompt": 'Отправьте новый текст *О боте* для {language}.\n\n/cancel для отмены.',
+        "admin_about_empty": 'Текст «О боте» не может быть пустым.',
+        "admin_about_updated": 'Текст «О боте» обновлен для {language}.',
+        "admin_about_update_failed": 'Не удалось обновить текст «О боте».',
         "language_prompt": "Выберите язык.",
         "language_updated": "Язык переключен на русский.",
         "change_language_label": "Сменить язык",
@@ -196,6 +210,13 @@ MESSAGES: dict[str, dict[str, str]] = {
         "cancelled": "Отменено.",
     },
     "uz": {
+        "about_us_label": 'ℹ️ Bot haqida',
+        "admin_edit_about_bot": 'Bot haqida matnini tahrirlash',
+        "admin_about_language_prompt": 'Bot haqida matni tilini tanlang.',
+        "admin_edit_about_prompt": '{language} uchun yangi *Bot haqida* matnini yuboring.\n\nBekor qilish: /cancel',
+        "admin_about_empty": "Bot haqida matni bo'sh bo'lmasligi kerak.",
+        "admin_about_updated": '{language} uchun Bot haqida matni yangilandi.',
+        "admin_about_update_failed": "Bot haqida matnini yangilab bo'lmadi.",
         "language_prompt": "Tilni tanlang.",
         "language_updated": "Til o'zbekchaga o'zgartirildi.",
         "change_language_label": "Tilni o'zgartirish",
@@ -294,7 +315,6 @@ MESSAGES: dict[str, dict[str, str]] = {
 }
 
 COMMON_MESSAGES = {
-    "about_us_label": "About Us",
     "onboarding_name_prompt": "Let's create your profile. Send your first and last name.",
     "onboarding_name_invalid": "Please send both first and last name as text.",
     "onboarding_age_prompt": "Great. Now send your age as a number.",
