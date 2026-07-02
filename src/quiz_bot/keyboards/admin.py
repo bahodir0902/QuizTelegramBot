@@ -11,6 +11,8 @@ from quiz_bot.config.constants import (
     CB_ADMIN_QUESTIONS,
     CB_ADMIN_SETTINGS,
     CB_ADMIN_STATS,
+    CB_ADMIN_USERS,
+    CB_ADMIN_USERS_PAGE_PREFIX,
     CB_QUESTION_DELETE_CONFIRM_PREFIX,
     CB_QUESTION_DELETE_OPTION_PREFIX,
     CB_QUESTION_DELETE_PREFIX,
@@ -47,6 +49,12 @@ def admin_dashboard_keyboard(language_code: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     translate(language_code, "settings"),
                     callback_data=CB_ADMIN_SETTINGS,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    translate(language_code, "admin_users"),
+                    callback_data=CB_ADMIN_USERS,
                 )
             ],
             [
@@ -236,3 +244,39 @@ def admin_settings_keyboard(config: BotConfig, language_code: str) -> InlineKeyb
             ],
         ]
     )
+
+
+def admin_users_pagination_keyboard(
+    language_code: str,
+    *,
+    page: int,
+    total_pages: int,
+) -> InlineKeyboardMarkup:
+    nav: list[InlineKeyboardButton] = []
+    if page > 1:
+        nav.append(
+            InlineKeyboardButton(
+                translate(language_code, "admin_users_prev"),
+                callback_data=f"{CB_ADMIN_USERS_PAGE_PREFIX}{page - 1}",
+            )
+        )
+    if page < total_pages:
+        nav.append(
+            InlineKeyboardButton(
+                translate(language_code, "admin_users_next"),
+                callback_data=f"{CB_ADMIN_USERS_PAGE_PREFIX}{page + 1}",
+            )
+        )
+
+    buttons: list[list[InlineKeyboardButton]] = []
+    if nav:
+        buttons.append(nav)
+    buttons.append(
+        [
+            InlineKeyboardButton(
+                translate(language_code, "admin_back"),
+                callback_data=CB_ADMIN_BACK,
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(buttons)
