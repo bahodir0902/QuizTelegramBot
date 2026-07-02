@@ -18,6 +18,7 @@ from telegram.request import HTTPXRequest
 from quiz_bot.config import (
     ASK_CORRECT_INDEX,
     ASK_EDIT_CORRECT_INDEX,
+    ASK_EDIT_ABOUT_TEXT,
     ASK_EDIT_OPTIONS,
     ASK_EDIT_QUESTION_TEXT,
     ASK_NUM_QUESTIONS,
@@ -34,6 +35,7 @@ from quiz_bot.handlers.admin_handlers import (
     admin_add_options,
     admin_add_question_text,
     admin_callback_router,
+    admin_edit_about_text,
     admin_edit_correct_index,
     admin_edit_options,
     admin_edit_question_text,
@@ -97,6 +99,7 @@ def build_application(settings: AppSettings) -> Application:
             CallbackQueryHandler(admin_callback_router, pattern="^admin:"),
             CallbackQueryHandler(admin_callback_router, pattern="^settings:"),
             CallbackQueryHandler(admin_callback_router, pattern="^question:"),
+            CallbackQueryHandler(admin_callback_router, pattern="^about:"),
         ],
         states={
             ASK_QUESTION_TEXT: [
@@ -145,6 +148,12 @@ def build_application(settings: AppSettings) -> Application:
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
                     admin_edit_correct_index,
+                )
+            ],
+            ASK_EDIT_ABOUT_TEXT: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    admin_edit_about_text,
                 )
             ],
         },

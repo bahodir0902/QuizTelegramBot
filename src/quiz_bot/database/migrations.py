@@ -57,6 +57,14 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
             user_id INTEGER PRIMARY KEY
         );
 
+        CREATE TABLE IF NOT EXISTS bot_content (
+            content_key TEXT NOT NULL,
+            language_code TEXT NOT NULL,
+            content_text TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (content_key, language_code)
+        );
+
         CREATE TABLE IF NOT EXISTS question_answers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             question_id INTEGER NOT NULL,
@@ -121,4 +129,18 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
                 id, num_questions, shuffle_questions, shuffle_options, question_timeout
             ) VALUES (1, 10, 1, 1, 0)
             """
+        )
+
+    default_about_texts = {
+        "uz": "Bu bot haqida:\n\nQuiz Bot bilimlaringizni qiziqarli testlar orqali sinash uchun yaratilgan.",
+        "ru": "О боте:\n\nQuiz Bot создан для увлекательных образовательных викторин.",
+        "en": "About this bot:\n\nQuiz Bot was created to deliver engaging educational quizzes.",
+    }
+    for language_code, content_text in default_about_texts.items():
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO bot_content (content_key, language_code, content_text)
+            VALUES ('about_bot', ?, ?)
+            """,
+            (language_code, content_text),
         )

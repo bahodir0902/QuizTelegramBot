@@ -10,10 +10,10 @@ from telegram.constants import ParseMode
 from telegram.ext import ContextTypes, ConversationHandler
 
 from quiz_bot.config import ASK_ONBOARD_AGE, ASK_ONBOARD_FULL_NAME, ASK_ONBOARD_REGION
-from quiz_bot.config.settings import DEFAULT_ABOUT_US_TEXT
 from quiz_bot.database import (
     adb_run,
     complete_onboarding_db,
+    get_about_bot_text_db,
     get_user_progress_db,
     save_onboarding_age_db,
     save_onboarding_name_db,
@@ -384,9 +384,16 @@ async def handle_about_us(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return await _prompt_onboarding_step(update, progress)
 
-    application = getattr(context, "application", None)
-    settings = application.bot_data.get("settings") if application else None
-    about_text = getattr(settings, "about_us_text", DEFAULT_ABOUT_US_TEXT)
+    try:
+        about_text = await adb_run(lambda conn: get_about_bot_text_db(conn, language_code))
+    except sqlite3.Error:
+        logger.exception(
+            "SQLite error while loading About bot text user_id=%s language=%s",
+            update.effective_user.id,
+            language_code,
+        )
+        await update.message.reply_text(translate(language_code, "db_error"))
+        return ConversationHandler.END
     await update.message.reply_text(
         about_text,
         reply_markup=main_reply_keyboard(language_code),
