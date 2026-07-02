@@ -9,6 +9,7 @@ from quiz_bot.config.constants import (
     CB_ADMIN_BACK,
     CB_ADMIN_EXPORT,
     CB_ADMIN_QUESTIONS,
+    CB_ADMIN_SEND_MESSAGE,
     CB_ADMIN_SETTINGS,
     CB_ADMIN_STATS,
     CB_QUESTION_DELETE_CONFIRM_PREFIX,
@@ -33,21 +34,19 @@ def admin_dashboard_keyboard(language_code: str) -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton(
-                    translate(language_code, "admin_add_question"),
-                    callback_data=CB_ADMIN_ADD,
+                    translate(language_code, "admin_send_message"),
+                    callback_data=CB_ADMIN_SEND_MESSAGE,
                 )
             ],
             [
+                InlineKeyboardButton(
+                    translate(language_code, "admin_add_question"),
+                    callback_data=CB_ADMIN_ADD,
+                ),
                 InlineKeyboardButton(
                     translate(language_code, "admin_manage_questions"),
                     callback_data=CB_ADMIN_QUESTIONS,
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    translate(language_code, "settings"),
-                    callback_data=CB_ADMIN_SETTINGS,
-                )
+                ),
             ],
             [
                 InlineKeyboardButton(
@@ -57,8 +56,18 @@ def admin_dashboard_keyboard(language_code: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
+                    translate(language_code, "settings"),
+                    callback_data=CB_ADMIN_SETTINGS,
+                ),
+                InlineKeyboardButton(
                     translate(language_code, "admin_export_data"),
                     callback_data=CB_ADMIN_EXPORT,
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    translate(language_code, "admin_back"),
+                    callback_data=CB_ADMIN_BACK,
                 )
             ],
         ]

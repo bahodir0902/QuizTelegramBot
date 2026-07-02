@@ -15,6 +15,7 @@ ASK_ONBOARD_REGION = 12
 SUPPORTED_LANGUAGES = ("en", "ru", "uz")
 
 CB_ADMIN_ADD = "admin:add"
+CB_ADMIN_SEND_MESSAGE = "admin:send_message"
 CB_ADMIN_SETTINGS = "admin:settings"
 CB_ADMIN_STATS = "admin:stats"
 CB_ADMIN_EXPORT = "admin:export"
