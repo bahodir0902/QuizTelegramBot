@@ -16,8 +16,13 @@ from telegram.ext import (
 from telegram.request import HTTPXRequest
 
 from quiz_bot.config import (
+    ASK_CHANNEL_URL,
+    ASK_BROADCAST_TEXT,
+    ASK_BROADCAST_CONFIRM,
     ASK_CORRECT_INDEX,
+    ASK_EDIT_CHANNEL_URL,
     ASK_EDIT_CORRECT_INDEX,
+    ASK_EDIT_ABOUT_TEXT,
     ASK_EDIT_OPTIONS,
     ASK_EDIT_QUESTION_TEXT,
     ASK_NUM_QUESTIONS,
@@ -30,13 +35,18 @@ from quiz_bot.config import (
     AppSettings,
 )
 from quiz_bot.handlers.admin_handlers import (
+    admin_add_channel_url,
     admin_add_correct_index,
     admin_add_options,
     admin_add_question_text,
+    admin_broadcast_confirm,
+    admin_broadcast_text,
     admin_callback_router,
+    admin_edit_channel_url,
     admin_edit_correct_index,
     admin_edit_options,
     admin_edit_question_text,
+    admin_edit_about_text,
     admin_set_num_questions,
     admin_set_timer,
     cmd_admin,
@@ -51,12 +61,16 @@ from quiz_bot.handlers.poll_handlers import handle_poll_answer
 from quiz_bot.handlers.user_handlers import (
     cmd_start,
     handle_about_us,
+    handle_channels_page,
     handle_onboarding_age,
     handle_onboarding_name,
+    handle_my_attempts,
     handle_onboarding_region,
+    handle_my_info,
     handle_start_quiz,
+    handle_subscription_check,
 )
-from quiz_bot.locales.messages import ABOUT_US_LABELS, CHANGE_LANGUAGE_LABELS, START_QUIZ_LABELS
+from quiz_bot.locales.messages import ABOUT_US_LABELS, ADMIN_DASHBOARD_LABELS, CHANGE_LANGUAGE_LABELS, CHANNELS_LABELS, MY_ATTEMPTS_LABELS, MY_INFO_LABELS, START_QUIZ_LABELS
 
 
 def _build_request(settings: AppSettings) -> HTTPXRequest:
@@ -76,8 +90,28 @@ def _change_language_regex() -> str:
     return "^(" + "|".join(escaped) + ")$"
 
 
+def _channels_regex() -> str:
+    escaped = [re.escape(label) for label in CHANNELS_LABELS]
+    return "^(" + "|".join(escaped) + ")$"
+
+
 def _about_us_regex() -> str:
     escaped = [re.escape(label) for label in ABOUT_US_LABELS]
+    return "^(" + "|".join(escaped) + ")$"
+
+
+def _my_attempts_regex() -> str:
+    escaped = [re.escape(label) for label in MY_ATTEMPTS_LABELS]
+    return "^(" + "|".join(escaped) + ")$"
+
+
+def _my_info_regex() -> str:
+    escaped = [re.escape(label) for label in MY_INFO_LABELS]
+    return "^(" + "|".join(escaped) + ")$"
+
+
+def _admin_dashboard_regex() -> str:
+    escaped = [re.escape(label) for label in ADMIN_DASHBOARD_LABELS]
     return "^(" + "|".join(escaped) + ")$"
 
 
@@ -97,8 +131,11 @@ def build_application(settings: AppSettings) -> Application:
             CallbackQueryHandler(admin_callback_router, pattern="^admin:"),
             CallbackQueryHandler(admin_callback_router, pattern="^settings:"),
             CallbackQueryHandler(admin_callback_router, pattern="^question:"),
+            CallbackQueryHandler(admin_callback_router, pattern="^channel:"),
         ],
         states={
+            ASK_CHANNEL_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_channel_url)],
+            ASK_EDIT_CHANNEL_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_channel_url)],
             ASK_QUESTION_TEXT: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
@@ -141,11 +178,21 @@ def build_application(settings: AppSettings) -> Application:
                     admin_edit_options,
                 )
             ],
+            ASK_EDIT_ABOUT_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_edit_about_text)],
             ASK_EDIT_CORRECT_INDEX: [
                 MessageHandler(
                     filters.TEXT & ~filters.COMMAND,
                     admin_edit_correct_index,
                 )
+            ],
+            ASK_BROADCAST_TEXT: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    admin_broadcast_text,
+                )
+            ],
+            ASK_BROADCAST_CONFIRM: [
+                CallbackQueryHandler(admin_broadcast_confirm, pattern="^broadcast:"),
             ],
         },
         fallbacks=[CommandHandler("cancel", cmd_cancel)],
@@ -163,6 +210,9 @@ def build_application(settings: AppSettings) -> Application:
             CommandHandler("start", cmd_start),
             MessageHandler(filters.Regex(_start_quiz_regex()), handle_start_quiz),
             MessageHandler(filters.Regex(_about_us_regex()), handle_about_us),
+            MessageHandler(filters.Regex(_channels_regex()), handle_channels_page),
+            MessageHandler(filters.Regex(_my_attempts_regex()), handle_my_attempts),
+            MessageHandler(filters.Regex(_my_info_regex()), handle_my_info),
         ],
         states={
             ASK_ONBOARD_FULL_NAME: [
@@ -193,8 +243,9 @@ def build_application(settings: AppSettings) -> Application:
 
     app.add_handler(user_conv)
     app.add_handler(CommandHandler("language", cmd_language))
-    app.add_handler(CommandHandler("admin", cmd_admin))
+    app.add_handler(MessageHandler(filters.Regex(_admin_dashboard_regex()), cmd_admin))
     app.add_handler(CallbackQueryHandler(handle_language_callback, pattern="^lang:"))
+    app.add_handler(CallbackQueryHandler(handle_subscription_check, pattern="^subscription:check$"))
     app.add_handler(admin_conv)
     app.add_handler(
         MessageHandler(

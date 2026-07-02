@@ -16,19 +16,31 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 from quiz_bot.config.constants import (
     ASK_EDIT_CORRECT_INDEX,
+    ASK_EDIT_ABOUT_TEXT,
     ASK_EDIT_OPTIONS,
+    ASK_CHANNEL_URL,
+    ASK_EDIT_CHANNEL_URL,
     ASK_EDIT_QUESTION_TEXT,
     ASK_CORRECT_INDEX,
     ASK_NUM_QUESTIONS,
     ASK_OPTIONS,
     ASK_QUESTION_TEXT,
     ASK_TIMER_SECONDS,
+    ASK_BROADCAST_TEXT,
+    ASK_BROADCAST_CONFIRM,
     CB_ADMIN_ADD,
+    CB_ADMIN_ABOUT,
     CB_ADMIN_BACK,
+    CB_BROADCAST_CANCEL,
+    CB_BROADCAST_SEND,
+    CB_ADMIN_CHANNELS,
     CB_ADMIN_EXPORT,
     CB_ADMIN_QUESTIONS,
     CB_ADMIN_SETTINGS,
+    CB_ADMIN_SEND_MESSAGE,
     CB_ADMIN_STATS,
+    CB_ADMIN_USERS,
+    CB_ADMIN_USERS_PAGE_PREFIX,
     CB_QUESTION_DELETE_CONFIRM_PREFIX,
     CB_QUESTION_DELETE_OPTION_PREFIX,
     CB_QUESTION_DELETE_PREFIX,
@@ -39,35 +51,54 @@ from quiz_bot.config.constants import (
     CB_QUESTION_VIEW_PREFIX,
     CB_SET_LIMIT,
     CB_SET_TIMER,
+    CB_CHANNEL_ADD,
+    CB_CHANNEL_DELETE_CONFIRM_PREFIX,
+    CB_CHANNEL_DELETE_PREFIX,
+    CB_CHANNEL_EDIT_PREFIX,
+    CB_CHANNEL_TOGGLE_REQUIRE_PREFIX,
     CB_TOGGLE_OPT_SHUFFLE,
     CB_TOGGLE_Q_SHUFFLE,
 )
 from quiz_bot.database import (
     adb_run,
+    create_channel_db,
+    delete_channel_db,
     delete_question_db,
     delete_question_option_db,
     fetch_export_rows_db,
     fetch_leaderboard_db,
+    count_user_progress_rows_db,
     fetch_question_db,
     fetch_question_stats_db,
+    list_channels_db,
     insert_question_db,
     is_admin_user,
+    list_user_progress_rows_db,
     list_questions_db,
+    list_registered_users_db,
     read_config,
     replace_question_options_db,
     toggle_config_field_db,
+    toggle_channel_required_db,
     update_config_field_db,
+    update_channel_db,
+    update_about_bot_text_db,
     update_question_correct_index_db,
     update_question_text_db,
 )
 from quiz_bot.keyboards import (
+    admin_channel_delete_keyboard,
+    admin_channels_keyboard,
+    admin_broadcast_confirm_keyboard,
     admin_dashboard_keyboard,
     admin_question_delete_keyboard,
     admin_question_detail_keyboard,
     admin_question_options_keyboard,
     admin_questions_keyboard,
     admin_settings_keyboard,
+    admin_users_pagination_keyboard,
 )
+from quiz_bot.services.channel_service import parse_channel_reference
 from quiz_bot.services.localization_service import language_for_user, translate
 from quiz_bot.utils.json import parse_options_json
 from quiz_bot.utils.names import user_display_name
@@ -160,6 +191,108 @@ async def _show_question_list(query, language_code: str) -> None:
     )
 
 
+ADMIN_USERS_PAGE_SIZE = 5
+
+
+def _admin_user_value(value: object, default: str = "—") -> str:
+    if value in (None, ""):
+        return default
+    return str(value)
+
+
+def _admin_user_profile(row: sqlite3.Row) -> str:
+    parts = [
+        _admin_user_value(row["first_name"]),
+        _admin_user_value(row["last_name"]),
+        _admin_user_value(row["age"]),
+        _admin_user_value(row["region"]),
+    ]
+    return " / ".join(parts)
+
+
+def _admin_user_status(row: sqlite3.Row, language_code: str) -> str:
+    if int(row["onboarding_completed"] or 0) == 1:
+        return translate(language_code, "admin_users_profile_completed")
+    return translate(
+        language_code,
+        "admin_users_profile_incomplete",
+        step=_admin_user_value(row["onboarding_step"], "not started"),
+    )
+
+
+def _admin_users_text(
+    rows: list[sqlite3.Row],
+    language_code: str,
+    *,
+    page: int,
+    total_count: int,
+    total_pages: int,
+) -> str:
+    lines = [
+        f"*{translate(language_code, 'admin_users_title', count=total_count, page=page, total_pages=total_pages)}*"
+    ]
+    for row in rows:
+        username = _admin_user_value(row["username"], "—")
+        lines.extend(
+            [
+                "",
+                translate(
+                    language_code,
+                    "admin_users_row",
+                    user_id=int(row["user_id"]),
+                    name=user_display_name(row),
+                    username=username,
+                    language=_admin_user_value(row["language_code"]),
+                    profile_status=_admin_user_status(row, language_code),
+                    score=int(row["score"] or 0),
+                    profile=_admin_user_profile(row),
+                    session_status=_admin_user_value(row["session_status"]),
+                    started=_admin_user_value(row["start_time"]),
+                    finished=_admin_user_value(row["finished_time"]),
+                ),
+            ]
+        )
+    return "\n".join(lines)
+
+
+async def _show_users_list(query, language_code: str, page: int = 1) -> None:
+    total_count = await adb_run(count_user_progress_rows_db)
+    if total_count == 0:
+        await safe_edit_message_text(
+            query,
+            translate(language_code, "admin_users_empty"),
+            reply_markup=admin_dashboard_keyboard(language_code),
+        )
+        return
+
+    total_pages = max(1, (total_count + ADMIN_USERS_PAGE_SIZE - 1) // ADMIN_USERS_PAGE_SIZE)
+    page = min(max(page, 1), total_pages)
+    offset = (page - 1) * ADMIN_USERS_PAGE_SIZE
+    rows = await adb_run(
+        lambda conn: list_user_progress_rows_db(
+            conn,
+            limit=ADMIN_USERS_PAGE_SIZE,
+            offset=offset,
+        )
+    )
+    await safe_edit_message_text(
+        query,
+        _admin_users_text(
+            rows,
+            language_code,
+            page=page,
+            total_count=total_count,
+            total_pages=total_pages,
+        ),
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=admin_users_pagination_keyboard(
+            language_code,
+            page=page,
+            total_pages=total_pages,
+        ),
+    )
+
+
 async def _show_question_detail(query, question_id: int, language_code: str) -> None:
     stats = await adb_run(lambda conn: fetch_question_stats_db(conn, question_id))
     if stats is None:
@@ -222,6 +355,52 @@ async def admin_callback_router(update: Update, context: ContextTypes.DEFAULT_TY
 
     data = query.data
     dashboard = admin_dashboard_keyboard(language_code)
+
+    if data == CB_ADMIN_CHANNELS:
+        rows = await adb_run(list_channels_db)
+        text = translate(language_code, "admin_channels_title") if rows else translate(language_code, "admin_channels_empty")
+        await safe_edit_message_text(query, text, reply_markup=admin_channels_keyboard(rows, language_code))
+        return ConversationHandler.END
+
+    if data == CB_CHANNEL_ADD:
+        await safe_edit_message_text(query, translate(language_code, "admin_channel_prompt"), parse_mode=ParseMode.MARKDOWN)
+        return ASK_CHANNEL_URL
+
+    channel_id = _callback_id(data, CB_CHANNEL_TOGGLE_REQUIRE_PREFIX)
+    if channel_id is not None:
+        await adb_run(lambda conn: toggle_channel_required_db(conn, channel_id), commit=True)
+        rows = await adb_run(list_channels_db)
+        await safe_edit_message_text(query, translate(language_code, "admin_channels_title"), reply_markup=admin_channels_keyboard(rows, language_code))
+        return ConversationHandler.END
+
+    channel_id = _callback_id(data, CB_CHANNEL_EDIT_PREFIX)
+    if channel_id is not None:
+        context.user_data["edit_channel_id"] = channel_id
+        await safe_edit_message_text(query, translate(language_code, "admin_channel_prompt"), parse_mode=ParseMode.MARKDOWN)
+        return ASK_EDIT_CHANNEL_URL
+
+    channel_id = _callback_id(data, CB_CHANNEL_DELETE_CONFIRM_PREFIX)
+    if channel_id is not None:
+        await safe_edit_message_text(query, translate(language_code, "admin_channel_delete_confirm", id=channel_id), reply_markup=admin_channel_delete_keyboard(channel_id, language_code))
+        return ConversationHandler.END
+
+    channel_id = _callback_id(data, CB_CHANNEL_DELETE_PREFIX)
+    if channel_id is not None:
+        ok = await adb_run(lambda conn: delete_channel_db(conn, channel_id), commit=True)
+        rows = await adb_run(list_channels_db)
+        text = translate(language_code, "admin_channel_deleted" if ok else "admin_channel_missing")
+        await safe_edit_message_text(query, text, reply_markup=admin_channels_keyboard(rows, language_code))
+        return ConversationHandler.END
+
+
+    if data == CB_ADMIN_USERS:
+        await _show_users_list(query, language_code)
+        return ConversationHandler.END
+
+    user_page = _callback_id(data, CB_ADMIN_USERS_PAGE_PREFIX)
+    if user_page is not None:
+        await _show_users_list(query, language_code, page=user_page)
+        return ConversationHandler.END
 
     if data == CB_ADMIN_STATS:
         try:
@@ -361,6 +540,27 @@ async def admin_callback_router(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup=admin_settings_keyboard(config, language_code),
         )
         return ConversationHandler.END
+
+    if data == CB_ADMIN_ABOUT:
+        await safe_edit_message_text(
+            query,
+            translate(language_code, "admin_about_language_prompt"),
+            reply_markup=admin_about_language_keyboard(language_code),
+        )
+        return ConversationHandler.END
+
+    if data.startswith(CB_EDIT_ABOUT_PREFIX):
+        about_language = data.removeprefix(CB_EDIT_ABOUT_PREFIX)
+        if about_language not in {"uz", "ru", "en"}:
+            await safe_edit_message_text(query, translate(language_code, "admin_settings_failed"))
+            return ConversationHandler.END
+        context.user_data["edit_about_language"] = about_language
+        await safe_edit_message_text(
+            query,
+            translate(language_code, "admin_edit_about_prompt", language=about_language),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return ASK_EDIT_ABOUT_TEXT
 
     if data == CB_ADMIN_BACK:
         await safe_edit_message_text(
@@ -559,6 +759,15 @@ async def admin_callback_router(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup=admin_settings_keyboard(config, language_code),
         )
         return ConversationHandler.END
+
+    if data == CB_ADMIN_BROADCAST:
+        context.user_data.pop("broadcast_text", None)
+        await safe_edit_message_text(
+            query,
+            translate(language_code, "admin_broadcast_prompt"),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return ASK_BROADCAST_TEXT
 
     if data == CB_ADMIN_ADD:
         await safe_edit_message_text(
@@ -901,4 +1110,104 @@ async def admin_set_timer(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         translate(language_code, message_key, value=value),
         reply_markup=admin_settings_keyboard(config, language_code),
     )
+    return ConversationHandler.END
+
+
+async def admin_add_channel_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    del context
+    if update.effective_user is None or update.message is None:
+        return ConversationHandler.END
+    language_code = await language_for_user(update.effective_user.id)
+    parsed = parse_channel_reference(update.message.text or "")
+    if parsed is None:
+        await update.message.reply_text(translate(language_code, "admin_channel_invalid"))
+        return ASK_CHANNEL_URL
+    await adb_run(lambda conn: create_channel_db(conn, parsed.title, parsed.url, parsed.username), commit=True)
+    rows = await adb_run(list_channels_db)
+    await update.message.reply_text(translate(language_code, "admin_channel_added"), reply_markup=admin_channels_keyboard(rows, language_code))
+    return ConversationHandler.END
+
+
+async def admin_edit_channel_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if update.effective_user is None or update.message is None:
+        return ConversationHandler.END
+    language_code = await language_for_user(update.effective_user.id)
+    channel_id = int(context.user_data.get("edit_channel_id", 0))
+    parsed = parse_channel_reference(update.message.text or "")
+    if channel_id <= 0 or parsed is None:
+        await update.message.reply_text(translate(language_code, "admin_channel_invalid"))
+        return ASK_EDIT_CHANNEL_URL
+    ok = await adb_run(lambda conn: update_channel_db(conn, channel_id, parsed.title, parsed.url, parsed.username), commit=True)
+    rows = await adb_run(list_channels_db)
+    await update.message.reply_text(translate(language_code, "admin_channel_updated" if ok else "admin_channel_missing"), reply_markup=admin_channels_keyboard(rows, language_code))
+    return ConversationHandler.END
+
+async def admin_broadcast_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    language_code = await _admin_language(update)
+    if update.message is None or update.effective_user is None:
+        return ConversationHandler.END
+    if not await adb_run(lambda conn: is_admin_user(conn, update.effective_user.id)):
+        await update.message.reply_text(translate(language_code, "permission_denied"))
+        return ConversationHandler.END
+    text = (update.message.text or "").strip()
+    if not text:
+        await update.message.reply_text(translate(language_code, "admin_broadcast_empty"))
+        return ASK_BROADCAST_TEXT
+    context.user_data["broadcast_text"] = text
+    await update.message.reply_text(
+        translate(language_code, "admin_broadcast_confirm_prompt", message=text),
+        reply_markup=admin_broadcast_confirm_keyboard(language_code),
+    )
+    return ASK_BROADCAST_CONFIRM
+
+
+async def admin_broadcast_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query is None or query.data is None or update.effective_user is None:
+        return ConversationHandler.END
+    await query.answer()
+    user_id = update.effective_user.id
+    language_code = await language_for_user(user_id)
+    dashboard = admin_dashboard_keyboard(language_code)
+    if not await adb_run(lambda conn: is_admin_user(conn, user_id)):
+        await safe_edit_message_text(query, translate(language_code, "permission_denied"))
+        return ConversationHandler.END
+    if query.data == CB_BROADCAST_CANCEL:
+        context.user_data.pop("broadcast_text", None)
+        await safe_edit_message_text(query, translate(language_code, "admin_broadcast_cancelled"), reply_markup=dashboard)
+        return ConversationHandler.END
+    if query.data != CB_BROADCAST_SEND:
+        return ASK_BROADCAST_CONFIRM
+    text = str(context.user_data.get("broadcast_text", "")).strip()
+    if not text:
+        await safe_edit_message_text(query, translate(language_code, "admin_broadcast_empty"))
+        return ASK_BROADCAST_TEXT
+    users = await adb_run(list_registered_users_db)
+    success_count = failure_count = 0
+    for row in users:
+        try:
+            await context.bot.send_message(chat_id=int(row["user_id"]), text=text)
+            success_count += 1
+        except TelegramError:
+            failure_count += 1
+    context.user_data.pop("broadcast_text", None)
+    await safe_edit_message_text(query, translate(language_code, "admin_broadcast_report", success=success_count, failure=failure_count), reply_markup=dashboard)
+    return ConversationHandler.END
+
+
+async def admin_edit_about_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    language_code = await _admin_language(update)
+    if update.message is None or update.effective_user is None:
+        return ConversationHandler.END
+    if not await adb_run(lambda conn: is_admin_user(conn, update.effective_user.id)):
+        await update.message.reply_text(translate(language_code, "permission_denied"))
+        return ConversationHandler.END
+    text = (update.message.text or "").strip()
+    if not text:
+        await update.message.reply_text(translate(language_code, "admin_about_text_empty"))
+        return ASK_EDIT_ABOUT_TEXT
+    about_language = context.user_data.get("edit_about_language", language_code)
+    await adb_run(lambda conn: update_about_bot_text_db(conn, str(about_language), text), commit=True)
+    context.user_data.pop("edit_about_language", None)
+    await update.message.reply_text(translate(language_code, "admin_about_text_updated"), reply_markup=admin_dashboard_keyboard(language_code))
     return ConversationHandler.END

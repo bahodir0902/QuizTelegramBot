@@ -6,11 +6,19 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from quiz_bot.config.constants import (
     CB_ADMIN_ADD,
+    CB_ADMIN_ABOUT,
     CB_ADMIN_BACK,
+    CB_ADMIN_BROADCAST,
+    CB_BROADCAST_CANCEL,
+    CB_BROADCAST_SEND,
     CB_ADMIN_EXPORT,
     CB_ADMIN_QUESTIONS,
+    CB_ADMIN_CHANNELS,
     CB_ADMIN_SETTINGS,
     CB_ADMIN_STATS,
+    CB_ADMIN_SEND_MESSAGE,
+    CB_ADMIN_USERS,
+    CB_ADMIN_USERS_PAGE_PREFIX,
     CB_QUESTION_DELETE_CONFIRM_PREFIX,
     CB_QUESTION_DELETE_OPTION_PREFIX,
     CB_QUESTION_DELETE_PREFIX,
@@ -21,6 +29,11 @@ from quiz_bot.config.constants import (
     CB_QUESTION_VIEW_PREFIX,
     CB_SET_LIMIT,
     CB_SET_TIMER,
+    CB_CHANNEL_ADD,
+    CB_CHANNEL_DELETE_CONFIRM_PREFIX,
+    CB_CHANNEL_DELETE_PREFIX,
+    CB_CHANNEL_EDIT_PREFIX,
+    CB_CHANNEL_TOGGLE_REQUIRE_PREFIX,
     CB_TOGGLE_OPT_SHUFFLE,
     CB_TOGGLE_Q_SHUFFLE,
 )
@@ -28,48 +41,26 @@ from quiz_bot.domain import BotConfig
 from quiz_bot.services.localization_service import translate
 
 
+def _shorten(text: str, limit: int = 40) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
 def admin_dashboard_keyboard(language_code: str) -> InlineKeyboardMarkup:
+    labels = {
+        "en": {"send": "📣 Send message", "add": "🧩 Create test", "tests": "📚 Tests", "stats": "📊 Results", "channels": "📡 Channels", "users": "👥 Users", "back": "⬅️ Back"},
+        "ru": {"send": "📣 Отправить сообщение", "add": "🧩 Создать тест", "tests": "📚 Тесты", "stats": "📊 Результаты", "channels": "📡 Каналы", "users": "👥 Пользователи", "back": "⬅️ Назад"},
+        "uz": {"send": "📣 Xabar yuborish", "add": "🧩 Test yaratish", "tests": "📚 Testlar", "stats": "📊 Natijalar", "channels": "📡 Kanallar", "users": "👥 Foydalanuvchilar", "back": "⬅️ Orqaga"},
+    }.get(language_code, None)
+    if labels is None:
+        labels = {"send": "📣 Send message", "add": "🧩 Create test", "tests": "📚 Tests", "stats": "📊 Results", "channels": "📡 Channels", "users": "👥 Users", "back": "⬅️ Back"}
     return InlineKeyboardMarkup(
         [
-            [
-                InlineKeyboardButton(
-                    translate(language_code, "admin_add_question"),
-                    callback_data=CB_ADMIN_ADD,
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    translate(language_code, "admin_manage_questions"),
-                    callback_data=CB_ADMIN_QUESTIONS,
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    translate(language_code, "settings"),
-                    callback_data=CB_ADMIN_SETTINGS,
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    translate(language_code, "admin_view_stats"),
-                    callback_data=CB_ADMIN_STATS,
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    translate(language_code, "admin_export_data"),
-                    callback_data=CB_ADMIN_EXPORT,
-                )
-            ],
+            [InlineKeyboardButton(labels["send"], callback_data=CB_ADMIN_SEND_MESSAGE)],
+            [InlineKeyboardButton(labels["add"], callback_data=CB_ADMIN_ADD), InlineKeyboardButton(labels["tests"], callback_data=CB_ADMIN_QUESTIONS)],
+            [InlineKeyboardButton(labels["stats"], callback_data=CB_ADMIN_STATS)],
+            [InlineKeyboardButton(labels["channels"], callback_data=CB_ADMIN_SETTINGS), InlineKeyboardButton(labels["users"], callback_data=CB_ADMIN_USERS)],
+            [InlineKeyboardButton(labels["back"], callback_data=CB_ADMIN_BACK)],
         ]
     )
-
-
-def _shorten(text: str, limit: int = 40) -> str:
-    cleaned = " ".join(text.split())
-    if len(cleaned) <= limit:
-        return cleaned
-    return f"{cleaned[: limit - 1]}..."
 
 
 def admin_questions_keyboard(rows, language_code: str) -> InlineKeyboardMarkup:
@@ -236,3 +227,62 @@ def admin_settings_keyboard(config: BotConfig, language_code: str) -> InlineKeyb
             ],
         ]
     )
+
+
+def admin_channels_keyboard(rows, language_code: str) -> InlineKeyboardMarkup:
+    buttons = [[InlineKeyboardButton(translate(language_code, "admin_add_channel"), callback_data=CB_CHANNEL_ADD)]]
+    for row in rows:
+        channel_id = int(row["id"])
+        state = translate(language_code, "admin_on" if int(row["require_join_before_test"]) else "admin_off")
+        label = f"#{channel_id} {_shorten(str(row['title']), 24)} ({state})"
+        buttons.append([InlineKeyboardButton(label, callback_data=f"{CB_CHANNEL_TOGGLE_REQUIRE_PREFIX}{channel_id}")])
+        buttons.append([
+            InlineKeyboardButton(translate(language_code, "admin_edit_channel"), callback_data=f"{CB_CHANNEL_EDIT_PREFIX}{channel_id}"),
+            InlineKeyboardButton(translate(language_code, "admin_delete_channel"), callback_data=f"{CB_CHANNEL_DELETE_CONFIRM_PREFIX}{channel_id}"),
+        ])
+    buttons.append([InlineKeyboardButton(translate(language_code, "admin_back"), callback_data=CB_ADMIN_BACK)])
+    return InlineKeyboardMarkup(buttons)
+
+
+def admin_channel_delete_keyboard(channel_id: int, language_code: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(translate(language_code, "admin_confirm_delete"), callback_data=f"{CB_CHANNEL_DELETE_PREFIX}{channel_id}")], [InlineKeyboardButton(translate(language_code, "admin_cancel_delete"), callback_data=CB_ADMIN_CHANNELS)]])
+
+
+def admin_users_pagination_keyboard(
+    language_code: str,
+    *,
+    page: int,
+    total_pages: int,
+) -> InlineKeyboardMarkup:
+    nav: list[InlineKeyboardButton] = []
+    if page > 1:
+        nav.append(
+            InlineKeyboardButton(
+                translate(language_code, "admin_users_prev"),
+                callback_data=f"{CB_ADMIN_USERS_PAGE_PREFIX}{page - 1}",
+            )
+        )
+    if page < total_pages:
+        nav.append(
+            InlineKeyboardButton(
+                translate(language_code, "admin_users_next"),
+                callback_data=f"{CB_ADMIN_USERS_PAGE_PREFIX}{page + 1}",
+            )
+        )
+
+    buttons: list[list[InlineKeyboardButton]] = []
+    if nav:
+        buttons.append(nav)
+    buttons.append(
+        [
+            InlineKeyboardButton(
+                translate(language_code, "admin_back"),
+                callback_data=CB_ADMIN_BACK,
+            )
+        ]
+    )
+    return InlineKeyboardMarkup(buttons)
+
+
+def admin_broadcast_confirm_keyboard(language_code: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(translate(language_code, "admin_broadcast_confirm_send"), callback_data=CB_BROADCAST_SEND), InlineKeyboardButton(translate(language_code, "admin_broadcast_confirm_cancel"), callback_data=CB_BROADCAST_CANCEL)]])
